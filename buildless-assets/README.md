@@ -35,13 +35,16 @@ per function. Larger stateful pieces are organized as small classes:
   the WGSL highlighter and its keyword/type tables live at module scope.
 - `TreeBuilder` in `garden-scene.js` grows the seeded bonsai tree; each build
   step (roots, moss, branches, canopy, pad scheduling) is one method.
+- `GardenScene` in `garden-scene.js` owns the post-load bonsai animation
+  (growth, petals, wind, and camera); `BackgroundScene` in `background-scene.js`
+  and `PrismScene` in `landing-prism-scene.js` own their respective scenes.
 
 The chat turn in `app.js` is driven by a small state object:
 `createTurnState()` builds the message, `consumeTurnEvent()` applies stream
 events, and `finishTurn()` finalizes meta, history, and context-full handling.
-`landing-prism-scene.js`, `garden-scene.js`, and `background-scene.js` are
-classic scripts whose top-level IIFE is only a module container; every real
-function inside it is under the same limit.
+The three scene files are classic scripts: their shared helpers and constants
+live at module scope inside their `window.THREE`/stage guard blocks, and every
+function - including the wrappers - stays under the 50-line limit.
 
 The GPU implementation is loaded as pinned browser ESM from jsDelivr:
 
