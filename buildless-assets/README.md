@@ -34,6 +34,15 @@ The answer renderer also loads pinned browser ESM from esm.sh: `marked@17`,
 `katex@0.16`, and `dompurify@3.2.6`. DOMPurify sanitizes generated Markdown
 before it is inserted into the page.
 
+`Bonsai-27B` requests bitgpu's `q8` KV cache and `f16` activation path. The
+runtime falls back safely when `shader-f16` is unavailable. Add
+`?overflow=sinks` to opt into bitgpu's fixed-memory rolling context policy;
+the default remains the strict context-window error mode.
+
+Add `?runtime=worker` to host bitgpu in a module Worker, following bitgpu's
+worker example. This is opt-in because Worker WebGPU availability differs by
+browser; the default keeps the broadly compatible main-thread runtime.
+
 The Kernels panel reads the static WGSL source catalogue from the same pinned
 `bitgpu` distribution after the model loads. Public `bitgpu` does not expose
 browser-specific compiled-pipeline variants.

@@ -248,6 +248,7 @@ export function setupModelAccess({
         ...modelOptions(),
         cache: query.has("nocache") ? false : undefined,
         maxLength: Number.parseInt(query.get("ctx") ?? "", 10) || undefined,
+        overflow: query.get("overflow") === "sinks" ? "sinks" : undefined,
         onProgress: onLoadProgress,
       });
       setChat(chat);

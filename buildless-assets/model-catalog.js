@@ -9,6 +9,11 @@ export const BONSAI_27B = Object.freeze({
     topP: 0.85,
     topK: 20,
   }),
+  runtime: Object.freeze({
+    kvCache: "q8",
+    activation: "f16",
+    overflow: "error",
+  }),
 });
 
 function isHttpUrl(value) {

@@ -167,11 +167,16 @@ export class Bonsai27B {
     });
 
     onProgress({ status: "init", message: "Requesting WebGPU device" });
+    const runtime =
+      source === BONSAI_27B.id ? BONSAI_27B.runtime : { kvCache: "q8" };
     const engine = await createEngine({
       ...gguf,
       dataUrl: ggufUrl,
       maxSeqLen: options.maxLength ?? DEFAULT_CONTEXT_LENGTH,
-      kvCache: "q8",
+      kvCache: options.kvCache ?? runtime.kvCache,
+      // bitgpu falls back to f32 automatically when shader-f16 is unavailable.
+      activation: options.activation ?? runtime.activation,
+      overflow: options.overflow ?? runtime.overflow,
       onProgress: createProgressReporter(onProgress),
       fetchStream: request.fetchStream,
     });
