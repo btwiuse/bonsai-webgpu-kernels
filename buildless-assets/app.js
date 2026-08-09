@@ -5,6 +5,23 @@ import { setupKernelInspector } from "./kernel-inspector.js";
 
 const $ = (id2) => document.getElementById(id2);
 let chat = null;
+let messages = [];
+let isGenerating = false;
+let contextExhausted = false;
+let abortController = null;
+const SEED_EXAMPLES = [
+  {
+    label: "LOGIC PUZZLE",
+    prompt:
+      "You have three boxes labeled Apples, Oranges, and Mixed. Every label is wrong.\n\nYou may take one fruit from one box without looking inside. How can you correctly relabel all three boxes?",
+  },
+  {
+    label: "GENERATE CODE",
+    prompt:
+      "Write a python function that takes a list of numbers and returns the sum of the even numbers.",
+  },
+  { label: "WRITE A HAIKU", prompt: "Write a haiku about a bonsai tree." },
+];
 const chatx = $("chatx"),
   cScroll = $("cScroll"),
   cThread = $("cThread");
