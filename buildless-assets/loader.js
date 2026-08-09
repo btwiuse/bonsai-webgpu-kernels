@@ -228,6 +228,20 @@ const App = {
   },
 };
 window.App = App;
+// Expose loader-derived globals on `window` so ESM scene files can read them
+// after the loader runs as a synchronous script tag.
+window.SEED = SEED;
+window.FREEZE = FREEZE;
+window.REDUCED = REDUCED;
+window.AZ_FIX = AZ_FIX;
+window.START_STAGE = START_STAGE;
+window.QS = QS;
+window.state = state;
+window.byId = byId;
+window.simulate = simulate;
+window.stepProgress = stepProgress;
+window.updateDom = updateDom;
+window.SPEED = SPEED;
 byId("loadCta").addEventListener("click", (e) => {
   e.preventDefault();
   App.go();
