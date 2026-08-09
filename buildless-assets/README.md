@@ -24,6 +24,25 @@ installation is required.
 | `app.css` | Shared overrides and final responsive rules |
 | `config.js` | Runtime access-gate configuration |
 
+## Structure and conventions
+
+Every function in these modules stays under 50 lines, with one responsibility
+per function. Larger stateful pieces are organized as small classes:
+
+- `ModelAccess` in `model-access.js` owns the access gate, token validation,
+  and the load lifecycle; `setupModelAccess()` wires events and boots the page.
+- `KernelInspector` in `kernel-inspector.js` owns the kernel-source dialog;
+  the WGSL highlighter and its keyword/type tables live at module scope.
+- `TreeBuilder` in `garden-scene.js` grows the seeded bonsai tree; each build
+  step (roots, moss, branches, canopy, pad scheduling) is one method.
+
+The chat turn in `app.js` is driven by a small state object:
+`createTurnState()` builds the message, `consumeTurnEvent()` applies stream
+events, and `finishTurn()` finalizes meta, history, and context-full handling.
+`landing-prism-scene.js`, `garden-scene.js`, and `background-scene.js` are
+classic scripts whose top-level IIFE is only a module container; every real
+function inside it is under the same limit.
+
 The GPU implementation is loaded as pinned browser ESM from jsDelivr:
 
 - `bitgpu@0.19.1/dist/index.js`: WebGPU inference engine
