@@ -1,4 +1,23 @@
-"use strict";
+// Loader — runs before the scene modules to populate window.* globals
+// (SEED, FREEZE, REDUCED, AZ_FIX, START_STAGE, QS, state, byId, simulate,
+// stepProgress, updateDom, SPEED, App, BonsaiLoader) so any classic
+// script that races ahead of the module graph still finds them.
+//
+// Converted from a classic <script> to an ES module so the loader can
+// also be imported directly:
+//   import { SEED, App } from "./loader.js";
+//
+// Window side effects are preserved at the bottom of the file as a
+// compatibility shim for legacy code paths.
+//
+// Module evaluation is asynchronous (modules are deferred), so:
+//   - Loading order in buildless.html still matters: this module must
+//     appear before any <script type="module"> that reads its globals.
+//   - Inline classic scripts that run *before* module evaluation may
+//     not see the globals yet — that path is the original reason
+//     config.js + loader.js used to be classic scripts. The window.*
+//     assignments still happen, just slightly later in the boot.
+
 const QS = new URLSearchParams(location.search);
 const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const FREEZE = QS.has("p") ? Math.min(1, Math.max(0, parseFloat(QS.get("p")) || 0)) : null;
@@ -7,8 +26,10 @@ const SEED = QS.has("seed") ? parseInt(QS.get("seed"), 10) >>> 0 : (Math.random(
 const AZ_FIX = QS.has("az") ? ((parseFloat(QS.get("az")) || 0) * Math.PI) / 180 : null;
 const TOTAL_BYTES = 38e8;
 const SHARDS = 32;
+
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 const lerp01 = (a, b, t) => a + (b - a) * t;
+
 const state = {
   target: 0,
   shown: 0,
@@ -24,8 +45,10 @@ const state = {
   tensorsTotal: 0,
   externalDone: false,
 };
+
 const readyCbs = [];
-window.BonsaiLoader = {
+
+const BonsaiLoader = {
   set(loadedBytes, totalBytes = TOTAL_BYTES, meta = {}) {
     state.external = true;
     state.totalBytes = totalBytes;
@@ -62,7 +85,9 @@ window.BonsaiLoader = {
     readyCbs.push(fn);
   },
 };
+
 const shardOf = (f) => Math.min(SHARDS, 1 + Math.floor(clamp01(f / 0.9) * SHARDS));
+
 function deriveStatus(f) {
   if (f >= 1) {
     return state.external ? "READY" : "READY — MODEL RESIDENT IN VRAM";
@@ -78,6 +103,7 @@ function deriveStatus(f) {
   }
   return "REQUESTING MANIFEST";
 }
+
 function simulate() {
   let simBytes = 0,
     stallUntil = 0,
@@ -105,7 +131,9 @@ function simulate() {
   };
   tick();
 }
+
 const byId = (id) => document.getElementById(id);
+
 const el = {
   pct: byId("pct"),
   status: byId("status"),
@@ -113,6 +141,7 @@ const el = {
   bar: byId("barFill"),
   prog: byId("uiLoad"),
 };
+
 const GB = (b) => (b / 1e9).toFixed(2);
 const fmtEta = (s) => {
   if (!isFinite(s) || s <= 0) return "";
@@ -120,6 +149,7 @@ const fmtEta = (s) => {
     ss = Math.ceil(s % 60);
   return " · ETA " + m + ":" + String(ss).padStart(2, "0");
 };
+
 let lastDom = 0;
 function updateDom(now) {
   if (now - lastDom < 0.12 && !state.doneAt) return;
@@ -150,10 +180,10 @@ function updateDom(now) {
     const seg = state.external
       ? state.tensorsTotal ? " · TENSOR " + state.tensors + "/" + state.tensorsTotal : ""
       : " · SHARD " + (state.shard || shardOf(f)) + "/" + SHARDS;
-    el.statA.textContent = GB(bytes) + " / " + GB(total) + " GB" + seg + rate +
-      eta;
+    el.statA.textContent = GB(bytes) + " / " + GB(total) + " GB" + seg + rate + eta;
   }
 }
+
 function stepProgress(dt, now) {
   if (FREEZE !== null) {
     state.target = state.shown = FREEZE;
@@ -172,12 +202,14 @@ function stepProgress(dt, now) {
   }
   return state.shown;
 }
+
 const START_STAGE = FREEZE !== null ||
     QS.has("az") ||
     QS.has("seed") ||
     QS.get("stage") === "loading"
   ? "loading"
   : "landing";
+
 const App = {
   stage: START_STAGE,
   landingActive: START_STAGE === "landing",
@@ -220,22 +252,54 @@ const App = {
     }
   },
 };
-window.App = App;
-// Expose loader-derived globals on `window` so ESM scene files can read them
-// after the loader runs as a synchronous script tag.
-window.SEED = SEED;
-window.FREEZE = FREEZE;
-window.REDUCED = REDUCED;
-window.AZ_FIX = AZ_FIX;
-window.START_STAGE = START_STAGE;
-window.QS = QS;
-window.state = state;
-window.byId = byId;
-window.simulate = simulate;
-window.stepProgress = stepProgress;
-window.updateDom = updateDom;
-window.SPEED = SPEED;
+
 byId("loadCta").addEventListener("click", (e) => {
   e.preventDefault();
   App.go();
 });
+
+// ─── Public ESM surface ─────────────────────────────────────────────
+//
+// Anything in this list can be imported directly:
+//   import { SEED, App, simulate } from "./loader.js";
+//
+// Window side effects below are kept for legacy callers that reach
+// for window.SEED etc. without going through the module graph.
+
+export {
+  App,
+  AZ_FIX,
+  BonsaiLoader,
+  byId,
+  FREEZE,
+  QS,
+  REDUCED,
+  SEED,
+  SHARDS,
+  simulate,
+  SPEED,
+  START_STAGE,
+  state,
+  stepProgress,
+  TOTAL_BYTES,
+  updateDom,
+};
+
+// ─── Window side effects (legacy compat) ────────────────────────────
+
+if (typeof window !== "undefined") {
+  window.SEED = SEED;
+  window.FREEZE = FREEZE;
+  window.REDUCED = REDUCED;
+  window.AZ_FIX = AZ_FIX;
+  window.START_STAGE = START_STAGE;
+  window.QS = QS;
+  window.state = state;
+  window.byId = byId;
+  window.simulate = simulate;
+  window.stepProgress = stepProgress;
+  window.updateDom = updateDom;
+  window.SPEED = SPEED;
+  window.App = App;
+  window.BonsaiLoader = BonsaiLoader;
+}

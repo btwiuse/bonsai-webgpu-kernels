@@ -2,14 +2,15 @@
 // tools/inline.mjs
 //
 // Bundle buildless.html into a single self-contained HTML file by:
-//   1. Calling esbuild to bundle each module entry (background, prism,
-//      garden, app) and the CSS set.
+//   1. Calling esbuild to bundle each module entry (config, loader,
+//      background, prism, garden, app) and the CSS set.
 //   2. Inlining the bundled JS / CSS back into buildless.html so the
-//      resulting file has no external dependencies.
+//      resulting file has no external dependencies except the pinned
+//      CDN three.min.js.
 //
 // Output: dist/buildless.bundled.html
 
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { execFile } from "node:child_process";
@@ -21,16 +22,17 @@ const root = resolve(here, "..", "..");
 const outDir = resolve(root, "dist");
 const tmpDir = resolve(here, "..", "inline-tmp");
 
-// Module entries — each becomes its own <script type="module">.
+// ES module entries — each becomes its own <script type="module"> in
+// the bundled output, in this order. Order matters: config → loader
+// must run before the scene modules that read window.SEED etc.
 const JS_ENTRIES = [
+  "src/core/config.js",
+  "src/core/loader.js",
   "src/scenes/background.js",
   "src/scenes/prism/index.js",
   "src/scenes/garden/index.js",
   "src/core/app.js",
 ];
-
-// Plain scripts — loaded as classic <script>.
-const PLAIN_SCRIPTS = ["src/core/config.js", "src/core/loader.js"];
 
 // CSS files concatenated into one <style> block.
 const CSS_ENTRIES = [
@@ -59,8 +61,7 @@ async function main() {
   await mkdir(outDir, { recursive: true });
   await mkdir(tmpDir, { recursive: true });
 
-  // 1. Bundle each module entry — write to <entryPath> relative to tmpDir
-  //    so the temp path mirrors the source layout.
+  // 1. Bundle each module entry to a separate ESM file.
   const bundledJs = {};
   for (const entry of JS_ENTRIES) {
     const outPath = resolve(tmpDir, entry);
@@ -76,22 +77,7 @@ async function main() {
     bundledJs[entry] = await readFile(outPath, "utf8");
   }
 
-  // 2. Plain scripts.
-  for (const entry of PLAIN_SCRIPTS) {
-    const outPath = resolve(tmpDir, entry);
-    await esbuild([
-      "--bundle",
-      "--target=es2020",
-      "--format=iife",
-      "--legal-comments=none",
-      "--log-level=warning",
-      `--outfile=${outPath}`,
-      resolve(root, entry),
-    ]);
-    bundledJs[entry] = await readFile(outPath, "utf8");
-  }
-
-  // 3. CSS — concatenate per-file bundles.
+  // 2. Bundle CSS — concatenate per-file bundles into one big string.
   const cssChunks = [];
   for (const cssEntry of CSS_ENTRIES) {
     const outPath = resolve(tmpDir, cssEntry);
@@ -105,7 +91,7 @@ async function main() {
   }
   const cssText = cssChunks.join("\n");
 
-  // 4. Splice.
+  // 3. Splice.
   const html = await readFile(resolve(root, "buildless.html"), "utf8");
   let out = html;
 
@@ -117,12 +103,6 @@ async function main() {
     "</head>",
     `    <style>\n${cssText}\n    </style>\n  </head>`,
   );
-
-  for (const plain of PLAIN_SCRIPTS) {
-    const escaped = plain.replace(/\./g, "\\.");
-    const re = new RegExp(`<script src="${escaped}"></script>`);
-    out = out.replace(re, `<script>\n${bundledJs[plain]}\n    </script>`);
-  }
 
   for (const entry of JS_ENTRIES) {
     const escaped = entry.replace(/\./g, "\\.");
@@ -136,11 +116,10 @@ async function main() {
   const outPath = resolve(outDir, "buildless.bundled.html");
   await writeFile(outPath, out);
 
-  const { stat } = await import("node:fs/promises");
   const size = (await stat(outPath)).size;
   console.log(
     `Wrote ${outPath}\n` +
-      `  ${JS_ENTRIES.length} modules + ${PLAIN_SCRIPTS.length} plain scripts inlined\n` +
+      `  ${JS_ENTRIES.length} ES module entries inlined\n` +
       `  ${CSS_ENTRIES.length} CSS files concatenated\n` +
       `  total size: ${(size / 1024).toFixed(1)} KB`,
   );
