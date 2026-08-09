@@ -30,22 +30,34 @@ The GPU implementation is loaded as pinned browser ESM from jsDelivr:
 - `bitgpu@0.19.1/dist/gguf.js`: GGUF parser and Bonsai-27B model manifest adapter
 - `bitgpu@0.19.1/dist/chat.js`: tokenizer, Jinja chat template, and streaming chat layer
 
+For its default model, the page also reads bitgpu's pinned, GPU-validated
+`models/bonsai-27b-gguf/manifest.json` and auxiliary lookup table from jsDelivr.
+The 3.8 GB GGUF still streams directly from Hugging Face. A custom `?src=` GGUF
+continues to use bitgpu's browser-side GGUF parser.
+
 The answer renderer also loads pinned browser ESM from esm.sh: `marked@17`,
 `katex@0.16`, and `dompurify@3.2.6`. DOMPurify sanitizes generated Markdown
 before it is inserted into the page.
 
 `Bonsai-27B` requests bitgpu's `q8` KV cache and `f16` activation path. The
-runtime falls back safely when `shader-f16` is unavailable. Add
-`?overflow=sinks` to opt into bitgpu's fixed-memory rolling context policy;
-the default remains the strict context-window error mode.
+runtime falls back safely when `shader-f16` is unavailable. Its pinned
+Qwen3.5 hybrid backbone does not support bitgpu's `overflow: "sinks"` policy,
+so this page retains strict context-window errors rather than exposing an
+invalid fixed-memory option.
+
+For the default Bonsai-27B model, each turn uses bitgpu's upstream recommended
+sampling settings: `temperature: 0.5`, `topP: 0.85`, and `topK: 20`. Custom
+`?src=` GGUF URLs retain bitgpu's own defaults unless their caller supplies
+turn options.
 
 Add `?runtime=worker` to host bitgpu in a module Worker, following bitgpu's
 worker example. This is opt-in because Worker WebGPU availability differs by
 browser; the default keeps the broadly compatible main-thread runtime.
 
-The Kernels panel reads the static WGSL source catalogue from the same pinned
-`bitgpu` distribution after the model loads. Public `bitgpu` does not expose
-browser-specific compiled-pipeline variants.
+The Kernels panel reads static WGSL files lazily from the same pinned `bitgpu`
+source tag on jsDelivr. Public `bitgpu` does not expose browser-specific
+compiled-pipeline variants, so the displayed code is the pinned source
+catalogue rather than a serialization of live pipelines.
 
 The source for the pinned runtime is available at
 <https://github.com/stfurkan/bitgpu/tree/v0.19.1/src>. The prior self-contained

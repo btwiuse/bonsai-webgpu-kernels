@@ -12,15 +12,13 @@ import {
 } from "./model-catalog.js";
 import { createModelFetch } from "./model-fetch.js";
 import { streamChatEvents } from "./chat-events.js";
+import { loadBitgpuKernelSources } from "./bitgpu-kernel-sources.js";
 
 export const DEFAULT_MODEL_ID = BONSAI_27B.id;
 export const DEFAULT_GGUF_FILE = BONSAI_27B.ggufFile;
 export { resolveGgufUrl as resolveGGUFUrl } from "./model-catalog.js";
 
 const DEFAULT_CONTEXT_LENGTH = 4096;
-const BITGPU_ENGINE_URL =
-  "https://cdn.jsdelivr.net/npm/bitgpu@0.19.1/dist/index.js";
-
 function createProgressReporter(onProgress) {
   return (progress) => {
     if (progress.phase === "weights" && Number.isFinite(progress.loaded)) {
@@ -44,63 +42,16 @@ function createProgressReporter(onProgress) {
   };
 }
 
-async function loadKernelSources() {
-  try {
-    const source = await (await fetch(BITGPU_ENGINE_URL)).text();
-    const declaration = "const SHADERS = ";
-    const start = source.indexOf(declaration);
-    if (start < 0) return [];
-
-    const objectStart = source.indexOf("{", start + declaration.length);
-    let depth = 0;
-    let quote = null;
-    let escaped = false;
-    let objectEnd = -1;
-
-    // The pinned distribution holds the WGSL catalogue in one JavaScript object.
-    // Scan string literals so braces in shader source do not end the object early.
-    for (let index = objectStart; index < source.length; index += 1) {
-      const character = source[index];
-      if (quote) {
-        if (escaped) escaped = false;
-        else if (character === "\\") escaped = true;
-        else if (character === quote) quote = null;
-        continue;
-      }
-      if (character === '"' || character === "'" || character === "`") {
-        quote = character;
-      } else if (character === "{") {
-        depth += 1;
-      } else if (character === "}" && --depth === 0) {
-        objectEnd = index;
-        break;
-      }
-    }
-    if (objectEnd < 0) return [];
-
-    const shaderObject = Function(
-      `"use strict"; ${source.slice(start, objectEnd + 1)}; return SHADERS;`,
-    )();
-    return Object.entries(shaderObject).map(([name, shaderSource]) => ({
-      name,
-      source: shaderSource,
-    }));
-  } catch {
-    return [];
-  }
-}
-
 class BonsaiChat {
-  constructor(engine, nativeChat, kernelSources) {
+  constructor(engine, nativeChat, defaultGeneration = {}) {
     this.engine = engine;
     this.nativeChat = nativeChat;
+    this.defaultGeneration = defaultGeneration;
     this.contextLength = engine.capabilities.maxSeqLen;
     this.contextFull = false;
     this.lastAssistantContent = null;
 
-    // bitgpu keeps the source catalogue private, so expose the pinned distribution's WGSL
-    // source table through the UI's existing kernel inspector contract.
-    this.runtime = { getRenderedShaders: () => kernelSources };
+    this.runtime = { getShaderSources: loadBitgpuKernelSources };
   }
 
   reset() {
@@ -114,7 +65,7 @@ class BonsaiChat {
       for await (const event of streamChatEvents(
         this.nativeChat,
         messages,
-        options,
+        { ...this.defaultGeneration, ...options },
       )) {
         if (event.type === "complete") {
           this.lastAssistantContent = event.result.text;
@@ -155,22 +106,31 @@ export class Bonsai27B {
   static async load(source = DEFAULT_MODEL_ID, options = {}) {
     const onProgress = options.onProgress ?? (() => {});
     const ggufUrl = resolveGgufUrl(source, options.file);
+    const useOfficialManifest = source === BONSAI_27B.id;
+    if (useOfficialManifest && options.overflow === "sinks") {
+      throw new Error(
+        "bitgpu: overflow 'sinks' is not supported by Bonsai-27B's qwen3_5 hybrid backbone. Remove ?overflow=sinks.",
+      );
+    }
     const request = createModelFetch({
       accessToken: options.accessToken,
       cache: options.cache,
       signal: options.signal,
     });
 
-    onProgress({ status: "init", message: "Parsing GGUF header" });
-    const gguf = await fromGguf(ggufUrl, {
-      fetchRange: request.fetchRange,
+    onProgress({
+      status: "init",
+      message: useOfficialManifest ? "Loading model manifest" : "Parsing GGUF header",
     });
+    const model = useOfficialManifest
+      ? { manifestUrl: BONSAI_27B.manifestUrl, auxUrl: BONSAI_27B.auxUrl }
+      : await fromGguf(ggufUrl, { fetchRange: request.fetchRange });
 
     onProgress({ status: "init", message: "Requesting WebGPU device" });
     const runtime =
       source === BONSAI_27B.id ? BONSAI_27B.runtime : { kvCache: "q8" };
     const engine = await createEngine({
-      ...gguf,
+      ...model,
       dataUrl: ggufUrl,
       maxSeqLen: options.maxLength ?? DEFAULT_CONTEXT_LENGTH,
       kvCache: options.kvCache ?? runtime.kvCache,
@@ -187,9 +147,12 @@ export class Bonsai27B {
       fetchJson: request.fetchJson,
     });
 
-    const kernelSources = await loadKernelSources();
     onProgress({ status: "ready", message: "Ready", fraction: 1 });
-    return new BonsaiChat(engine, nativeChat, kernelSources);
+    return new BonsaiChat(
+      engine,
+      nativeChat,
+      useOfficialManifest ? BONSAI_27B.defaultGeneration : undefined,
+    );
   }
 }
 

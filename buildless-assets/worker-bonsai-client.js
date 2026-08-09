@@ -1,4 +1,5 @@
 // Main-thread facade for model-worker.js. Its public surface matches Bonsai27B's chat wrapper.
+import { loadBitgpuKernelSources } from "./bitgpu-kernel-sources.js";
 export class WorkerBonsai27B {
   static async checkAvailability(...args) {
     return globalThis.navigator?.gpu
@@ -27,7 +28,7 @@ class WorkerChatClient {
     this.contextLength = 0;
     this.contextFull = false;
     this.lastAssistantContent = null;
-    this.runtime = { getRenderedShaders: () => [] };
+    this.runtime = { getShaderSources: loadBitgpuKernelSources };
     this.events = [];
     this.wake = null;
     this.loadResolve = null;

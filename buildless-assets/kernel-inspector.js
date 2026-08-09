@@ -12,30 +12,45 @@ export function setupKernelInspector({ getChat, byId }) {
   document.addEventListener("keydown", (e2) => {
     if (e2.key === "Escape" && !kernelsOverlay.hidden) closeKernels();
   });
-  function openKernels() {
+  async function openKernels() {
     const chat = getChat();
-    kernels = (chat ? (chat.runtime.getRenderedShaders?.() ?? []) : []).filter(
-      (k) => !/\btranscode\b|\.transcode\./i.test(k.name),
-    );
     const list = $("kxList");
     list.replaceChildren();
-    $("kxSub").textContent = kernels.length
-      ? `${kernels.length} WGSL COMPUTE SHADERS · COMPILED FOR YOUR GPU`
-      : "LOAD THE MODEL TO INSPECT ITS COMPILED KERNELS";
-    kernels.forEach((k, i) => {
-      const item = document.createElement("button");
-      item.className = "kx-item";
-      item.type = "button";
-      item.textContent = k.name;
-      item.addEventListener("click", () => selectKernel(i));
-      list.appendChild(item);
-    });
     $("kxSource").hidden = true;
     $("kxIntro").hidden = false;
     kxCopySource = "";
     kernelsOverlay.hidden = false;
     document.body.classList.add("kx-locked");
     list.scrollTop = 0;
+    requestAnimationFrame(updateListFade);
+
+    if (!chat) {
+      $("kxSub").textContent = "LOAD THE MODEL TO INSPECT ITS COMPILED KERNELS";
+      return;
+    }
+
+    $("kxSub").textContent = "LOADING PINNED BITGPU WGSL SOURCES";
+    try {
+      kernels = await (chat.runtime.getShaderSources?.() ?? []);
+      kernels = kernels.filter((kernel) => !/\btranscode\b|\.transcode\./i.test(kernel.name));
+      renderKernelList();
+    } catch {
+      kernels = [];
+      $("kxSub").textContent = "KERNEL SOURCE CATALOG UNAVAILABLE";
+    }
+  }
+  function renderKernelList() {
+    const list = $("kxList");
+    list.replaceChildren();
+    $("kxSub").textContent = `${kernels.length} WGSL COMPUTE SHADERS · COMPILED FOR YOUR GPU`;
+    kernels.forEach((kernel, index) => {
+      const item = document.createElement("button");
+      item.className = "kx-item";
+      item.type = "button";
+      item.textContent = kernel.name;
+      item.addEventListener("click", () => selectKernel(index));
+      list.appendChild(item);
+    });
     requestAnimationFrame(updateListFade);
   }
   function updateListFade() {
