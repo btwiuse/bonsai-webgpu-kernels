@@ -5,9 +5,7 @@ export const TAU = Math.PI * 2;
 export const UP = new THREE.Vector3(0, 1, 0);
 
 // Reduced-motion multiplier; matches the prism scene's SPD convention.
-export const MOT = matchMedia("(prefers-reduced-motion: reduce)").matches
-  ? 0.35
-  : 1;
+export const MOT = matchMedia("(prefers-reduced-motion: reduce)").matches ? 0.35 : 1;
 
 export const clamp = THREE.MathUtils.clamp;
 export const lerp = THREE.MathUtils.lerp;

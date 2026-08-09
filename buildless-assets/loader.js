@@ -1,16 +1,10 @@
 "use strict";
 const QS = new URLSearchParams(location.search);
 const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
-const FREEZE = QS.has("p")
-  ? Math.min(1, Math.max(0, parseFloat(QS.get("p")) || 0))
-  : null;
+const FREEZE = QS.has("p") ? Math.min(1, Math.max(0, parseFloat(QS.get("p")) || 0)) : null;
 const SPEED = Math.max(0.1, parseFloat(QS.get("speed")) || 1);
-const SEED = QS.has("seed")
-  ? parseInt(QS.get("seed"), 10) >>> 0
-  : (Math.random() * 1e9) | 0;
-const AZ_FIX = QS.has("az")
-  ? ((parseFloat(QS.get("az")) || 0) * Math.PI) / 180
-  : null;
+const SEED = QS.has("seed") ? parseInt(QS.get("seed"), 10) >>> 0 : (Math.random() * 1e9) | 0;
+const AZ_FIX = QS.has("az") ? ((parseFloat(QS.get("az")) || 0) * Math.PI) / 180 : null;
 const TOTAL_BYTES = 38e8;
 const SHARDS = 32;
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
@@ -68,8 +62,7 @@ window.BonsaiLoader = {
     readyCbs.push(fn);
   },
 };
-const shardOf = (f) =>
-  Math.min(SHARDS, 1 + Math.floor(clamp01(f / 0.9) * SHARDS));
+const shardOf = (f) => Math.min(SHARDS, 1 + Math.floor(clamp01(f / 0.9) * SHARDS));
 function deriveStatus(f) {
   if (f >= 1) {
     return state.external ? "READY" : "READY — MODEL RESIDENT IN VRAM";
@@ -101,13 +94,7 @@ function simulate() {
         stallUntil = now + 0.4 + Math.random() * 0.8;
       }
       const frac = simBytes / TOTAL_BYTES;
-      const phaseMul = frac > 0.985
-        ? 0.1
-        : frac > 0.95
-        ? 0.16
-        : frac > 0.9
-        ? 0.35
-        : 1;
+      const phaseMul = frac > 0.985 ? 0.1 : frac > 0.95 ? 0.16 : frac > 0.9 ? 0.35 : 1;
       const mbps = (150 + 55 * Math.sin(t * 0.5) + (Math.random() - 0.5) * 60) *
         phaseMul;
       simBytes = Math.min(TOTAL_BYTES, simBytes + mbps * 1e6 * SPEED * dt);
@@ -158,14 +145,10 @@ function updateDom(now) {
   } else {
     const total = state.totalBytes;
     const bytes = f * total;
-    const rate = state.rate > 1e5
-      ? " · " + Math.round(state.rate / 1e6) + " MB/S"
-      : "";
+    const rate = state.rate > 1e5 ? " · " + Math.round(state.rate / 1e6) + " MB/S" : "";
     const eta = state.rate > 1e5 ? fmtEta((total - bytes) / state.rate) : "";
     const seg = state.external
-      ? state.tensorsTotal
-        ? " · TENSOR " + state.tensors + "/" + state.tensorsTotal
-        : ""
+      ? state.tensorsTotal ? " · TENSOR " + state.tensors + "/" + state.tensorsTotal : ""
       : " · SHARD " + (state.shard || shardOf(f)) + "/" + SHARDS;
     el.statA.textContent = GB(bytes) + " / " + GB(total) + " GB" + seg + rate +
       eta;

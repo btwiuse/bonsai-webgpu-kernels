@@ -103,8 +103,7 @@ function makeSheet(
   rows,
   { opacity, headWhite, headK, alongBase, alongK, order = 6 },
 ) {
-  const { geo, pos, aAlpha, aRev, posAttr, aAttr, revAttr } =
-    createSheetGeometry(cols, rows);
+  const { geo, pos, aAlpha, aRev, posAttr, aAttr, revAttr } = createSheetGeometry(cols, rows);
   const mat = createSheetMaterial({
     opacity,
     headWhite,
@@ -310,9 +309,7 @@ export const PrismInitMethods = {
         () => makeSprite(this.scene, this.glowTex, hex, 0.075, 0, 9),
       );
     });
-    this.washes = PULSE_W.map((w) =>
-      makeSprite(this.scene, this.glowTex, pulseHex(w), 5.5, 0, 2)
-    );
+    this.washes = PULSE_W.map((w) => makeSprite(this.scene, this.glowTex, pulseHex(w), 5.5, 0, 2));
     this.SAMP = new THREE.Vector3();
     this.APEX_LOCAL = new THREE.Vector3(0, R, DEPTH / 2 + 0.02);
     this.CORNER_LOCAL = LOCAL_V.slice(1).map(

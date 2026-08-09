@@ -1,9 +1,7 @@
 // Generic numeric helpers and reduced-motion speed for the prism scene.
 // No THREE dependency.
 
-const reducedSpeed = matchMedia("(prefers-reduced-motion: reduce)").matches
-  ? 0.35
-  : 1;
+const reducedSpeed = matchMedia("(prefers-reduced-motion: reduce)").matches ? 0.35 : 1;
 
 export const SPD = reducedSpeed;
 

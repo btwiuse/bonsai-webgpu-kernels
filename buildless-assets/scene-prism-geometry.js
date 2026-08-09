@@ -2,12 +2,7 @@
 // Builds dynamic BufferGeometries with side+tangent attributes for beams
 // and column-typed attributes for spectral sheets.
 
-import {
-  BEAM_FRAG,
-  BEAM_VERT,
-  SHEET_FRAG,
-  SHEET_VERT,
-} from "./scene-prism-shaders.js";
+import { BEAM_FRAG, BEAM_VERT, SHEET_FRAG, SHEET_VERT } from "./scene-prism-shaders.js";
 import { specColor } from "./scene-prism-optics.js";
 
 // Three vertices of the equilateral triangle (circumradius R).
@@ -18,8 +13,7 @@ export const LOCAL_V = Array.from({ length: 3 }, (_, i) => {
 });
 
 // Allocate a pool of mutable THREE.Vector3 points.
-export const vecArray = (n) =>
-  Array.from({ length: n }, () => new THREE.Vector3());
+export const vecArray = (n) => Array.from({ length: n }, () => new THREE.Vector3());
 
 // Triangulated strip of n segments oriented along position+tangent+side.
 export function createBeamGeometry(n) {

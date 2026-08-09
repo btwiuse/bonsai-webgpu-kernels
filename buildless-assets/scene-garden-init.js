@@ -4,12 +4,7 @@
 // Composed into GardenScene.prototype by `scene-garden-class.js`.
 
 import { clamp, lerp, MOT, SC, TAU } from "./scene-garden-utils.js";
-import {
-  glowTex,
-  groundTex,
-  petalTex,
-  shadowTex,
-} from "./scene-garden-assets.js";
+import { glowTex, groundTex, petalTex, shadowTex } from "./scene-garden-assets.js";
 import { TreeBuilder } from "./scene-garden-tree.js";
 
 // Loader-provided globals; loader.js runs first as a plain script.

@@ -5,8 +5,7 @@
 const BITGPU_TAG = "v0.19.1";
 const PACKAGE_INDEX_URL =
   `https://data.jsdelivr.com/v1/package/gh/stfurkan/bitgpu@${BITGPU_TAG}/flat`;
-const SHADER_BASE_URL =
-  `https://cdn.jsdelivr.net/gh/stfurkan/bitgpu@${BITGPU_TAG}/shaders/`;
+const SHADER_BASE_URL = `https://cdn.jsdelivr.net/gh/stfurkan/bitgpu@${BITGPU_TAG}/shaders/`;
 
 let catalogRequest = null;
 

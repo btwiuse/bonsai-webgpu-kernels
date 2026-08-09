@@ -38,9 +38,7 @@ export const PrismUpdateMethods = {
       this.writeInnerColumn(rec, c, zOff);
       this.T_OUT[c] = airT + (rec.len * this.N_COL[c]) / CV;
     }
-    const glassRev = rec.len > 1e-6
-      ? clamp01((sinceEntry * (CV / this.N_COL[c])) / rec.len)
-      : 0;
+    const glassRev = rec.len > 1e-6 ? clamp01((sinceEntry * (CV / this.N_COL[c])) / rec.len) : 0;
     this.innerSheet.setAlpha(c, this.colAlpha[c]);
     this.innerSheet.setRev(c, glassRev);
     this.exitSheet.setAlpha(c, this.colAlpha[c]);

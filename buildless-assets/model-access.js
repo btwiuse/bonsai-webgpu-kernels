@@ -237,9 +237,7 @@ class ModelAccess {
         BonsaiLoader.phase(null);
         BonsaiLoader.set(
           event.loaded,
-          Number.isFinite(event.total) && event.total > 0
-            ? event.total
-            : FALLBACK_BYTES,
+          Number.isFinite(event.total) && event.total > 0 ? event.total : FALLBACK_BYTES,
         );
       } else if (event.kind === "tensors") {
         if (/warmup/i.test(event.message || "")) {

@@ -2,14 +2,7 @@
 //
 // Composed into GardenScene.prototype by `scene-garden-class.js`.
 
-import {
-  clamp,
-  easeOutBack,
-  easeOutCubic,
-  lerp,
-  MOT,
-  TAU,
-} from "./scene-garden-utils.js";
+import { clamp, easeOutBack, easeOutCubic, lerp, MOT, TAU } from "./scene-garden-utils.js";
 
 const PET_N = 110;
 
@@ -81,8 +74,7 @@ export const GardenUpdateMethods = {
           this.wind * 0.45 +
           this.gustX * 1.1) *
           dt;
-        petal.position.z +=
-          (Math.cos(t * 0.9 + petal.phase) * 0.18 + this.gustZ * 1.1) * dt;
+        petal.position.z += (Math.cos(t * 0.9 + petal.phase) * 0.18 + this.gustZ * 1.1) * dt;
         petal.rotation.x += petal.spin.x * dt;
         petal.rotation.y += petal.spin.y * dt;
         petal.rotation.z += petal.spin.z * dt;
@@ -207,8 +199,7 @@ export const GardenUpdateMethods = {
     this.shakeAmp *= Math.exp(-dt * 2.6);
     const wobble = Math.sin(t * 13 + this.shakeSeed) * this.shakeAmp;
     const gust = Math.max(0, this.wind);
-    this.tree.group.rotation.z =
-      Math.sin(t * 0.6) * 0.005 * (0.6 + 0.4 * gust) * MOT -
+    this.tree.group.rotation.z = Math.sin(t * 0.6) * 0.005 * (0.6 + 0.4 * gust) * MOT -
       this.leanX * 0.055 +
       wobble * 0.02;
     this.tree.group.rotation.x = Math.sin(t * 0.43 + 1) * 0.004 * MOT +

@@ -80,11 +80,7 @@ function highlightWgsl(src) {
     if (comment) out += `<span class="k-cm">${escapeHtml(comment)}</span>`;
     else if (attr) out += `<span class="k-at">${escapeHtml(attr)}</span>`;
     else if (ident) {
-      const cls = WGSL_KEYWORDS.has(ident)
-        ? "k-kw"
-        : WGSL_TYPES.has(ident)
-        ? "k-ty"
-        : null;
+      const cls = WGSL_KEYWORDS.has(ident) ? "k-kw" : WGSL_TYPES.has(ident) ? "k-ty" : null;
       out += cls ? `<span class="${cls}">${ident}</span>` : escapeHtml(ident);
     } else if (num) out += `<span class="k-nu">${escapeHtml(num)}</span>`;
     else if (ws) out += ws;
@@ -150,8 +146,7 @@ export class KernelInspector {
     const $ = this.$;
     const list = $("kxList");
     list.replaceChildren();
-    $("kxSub").textContent =
-      `${this.kernels.length} WGSL COMPUTE SHADERS · COMPILED FOR YOUR GPU`;
+    $("kxSub").textContent = `${this.kernels.length} WGSL COMPUTE SHADERS · COMPILED FOR YOUR GPU`;
     this.kernels.forEach((kernel, index) => {
       const item = document.createElement("button");
       item.className = "kx-item";
@@ -176,9 +171,7 @@ export class KernelInspector {
     const $ = this.$;
     $("kxIntro").hidden = true;
     $("kxSource").hidden = false;
-    [...$("kxList").children].forEach((el, j) =>
-      el.classList.toggle("active", j === index)
-    );
+    [...$("kxList").children].forEach((el, j) => el.classList.toggle("active", j === index));
     $("kxName").textContent = kernel.name;
     $("kxLines").textContent = `${kernel.source.split("\n").length} LINES`;
     $("kxCode").innerHTML = highlightWgsl(kernel.source);

@@ -5,11 +5,7 @@
 import { createEngine } from "https://cdn.jsdelivr.net/npm/bitgpu@0.19.1/dist/index.js";
 import { createChat } from "https://cdn.jsdelivr.net/npm/bitgpu@0.19.1/dist/chat.js";
 import { fromGguf } from "https://cdn.jsdelivr.net/npm/bitgpu@0.19.1/dist/gguf.js";
-import {
-  BONSAI_27B,
-  resolveGgufUrl,
-  tokenizerDirectory,
-} from "./model-catalog.js";
+import { BONSAI_27B, resolveGgufUrl, tokenizerDirectory } from "./model-catalog.js";
 import { createModelFetch } from "./model-fetch.js";
 import { streamChatEvents } from "./chat-events.js";
 import { loadBitgpuKernelSources } from "./bitgpu-kernel-sources.js";
@@ -54,9 +50,7 @@ async function resolveModelSource(source, ggufUrl, request, onProgress) {
   const useOfficialManifest = source === BONSAI_27B.id;
   onProgress({
     status: "init",
-    message: useOfficialManifest
-      ? "Loading model manifest"
-      : "Parsing GGUF header",
+    message: useOfficialManifest ? "Loading model manifest" : "Parsing GGUF header",
   });
   const model = useOfficialManifest
     ? { manifestUrl: BONSAI_27B.manifestUrl, auxUrl: BONSAI_27B.auxUrl }
@@ -110,8 +104,7 @@ export class Bonsai27B {
     if (!navigator.gpu) {
       return {
         ok: false,
-        reason:
-          "WebGPU isn't available in this browser. Try a recent Chrome or Edge.",
+        reason: "WebGPU isn't available in this browser. Try a recent Chrome or Edge.",
       };
     }
 
@@ -145,9 +138,7 @@ export class Bonsai27B {
     );
 
     onProgress({ status: "init", message: "Requesting WebGPU device" });
-    const runtime = source === BONSAI_27B.id
-      ? BONSAI_27B.runtime
-      : { kvCache: "q8" };
+    const runtime = source === BONSAI_27B.id ? BONSAI_27B.runtime : { kvCache: "q8" };
     const engine = await createEngine({
       ...model,
       dataUrl: ggufUrl,

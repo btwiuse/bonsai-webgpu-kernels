@@ -123,8 +123,7 @@ function autoGrow() {
   cInput.style.height = `${Math.min(cInput.scrollHeight, 180)}px`;
 }
 function scrollDown(force = false) {
-  const nearBottom =
-    cScroll.scrollHeight - cScroll.scrollTop - cScroll.clientHeight < 90;
+  const nearBottom = cScroll.scrollHeight - cScroll.scrollTop - cScroll.clientHeight < 90;
   if (force || nearBottom) cScroll.scrollTop = cScroll.scrollHeight;
 }
 function setGenerating(on) {
@@ -260,9 +259,7 @@ function consumeTurnEvent(event, turn) {
       turn.phase = "answer";
       finishThinking(turn);
     }
-    turn.answer += turn.answer === ""
-      ? event.delta.replace(/^\s+/, "")
-      : event.delta;
+    turn.answer += turn.answer === "" ? event.delta.replace(/^\s+/, "") : event.delta;
     scheduleStream(() => renderAnswer(turn.aBody, turn.answer, true));
   }
   updateLiveStat({
@@ -366,9 +363,7 @@ function appendMeta(
   const parts = [`${tokens} TOK`];
   if (thinkEndedAt) {
     parts.push(
-      `THOUGHT ${
-        ((thinkEndedAt - (firstTokenAt || startedAt)) / 1e3).toFixed(1)
-      }S`,
+      `THOUGHT ${((thinkEndedAt - (firstTokenAt || startedAt)) / 1e3).toFixed(1)}S`,
     );
   }
   if (firstTokenAt) {

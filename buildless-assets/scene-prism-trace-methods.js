@@ -4,13 +4,7 @@
 // Composed into PrismScene.prototype by `scene-prism-class.js`.
 
 import { CV, EXIT_LEN } from "./scene-prism-constants.js";
-import {
-  clamp01,
-  hermite as smoothEase,
-  RAY,
-  SLOPE,
-  sstep,
-} from "./scene-prism-utils.js";
+import { clamp01, hermite as smoothEase, RAY, SLOPE, sstep } from "./scene-prism-utils.js";
 import { cross2, reflect2, refract2 } from "./scene-prism-trace.js";
 
 export const PrismTraceMethods = {
@@ -156,9 +150,7 @@ export const PrismTraceMethods = {
       const x = x0 + (x1 - x0) * u;
       let y = y0 + (y1 - y0) * u;
       const envL = sstep(0.02, 0.18, u);
-      const envR = hasEntry
-        ? smoothEase(clamp01((x1 - x) / 3))
-        : sstep(0.02, 0.18, 1 - u);
+      const envR = hasEntry ? smoothEase(clamp01((x1 - x) / 3)) : sstep(0.02, 0.18, 1 - u);
       y += Math.sin((x - CV * tA) * 0.65) * 0.05 * envL * envR;
       this.INC_PTS[k].set(x, y, 0);
     }
@@ -234,9 +226,7 @@ export const PrismTraceMethods = {
         acc += this.SEG_LEN[seg];
         seg++;
       }
-      const u = this.SEG_LEN[seg] > 1e-9
-        ? (target - acc) / this.SEG_LEN[seg]
-        : 0;
+      const u = this.SEG_LEN[seg] > 1e-9 ? (target - acc) / this.SEG_LEN[seg] : 0;
       const a = rec.pts[seg - 1];
       const b = rec.pts[seg];
       this.innerSheet.setPoint(
