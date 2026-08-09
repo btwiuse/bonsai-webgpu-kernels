@@ -7,9 +7,13 @@ installation is required.
 | --- | --- |
 | `loader.js` | Landing-stage state and model loading progress UI |
 | `background-scene.js` | Ambient Three.js backdrop |
-| `prism-scene.js` | Landing prism and garden Three.js scenes |
+| `landing-prism-scene.js` | Landing prism Three.js scene and handoff cleanup |
+| `garden-scene.js` | Post-load garden Three.js scene |
 | `model-access.js` | Access gate, WebGPU availability checks, and model load lifecycle |
+| `model-catalog.js` | Model weights, tokenizer, and generation metadata |
+| `model-fetch.js` | Authenticated GGUF requests and optional Cache Storage integration |
 | `app.js` | Chat session state and UI orchestration |
+| `chat-events.js` | Typed UI events over bitgpu's chat stream |
 | `markdown-renderer.js` | Incremental Markdown and KaTeX answer rendering |
 | `kernel-inspector.js` | Kernel-source dialog and search UI |
 | `bonsai-adapter.js` | Model URL resolution, Hugging Face access-token requests, loading progress, and the UI-facing streaming chat contract |
