@@ -179,11 +179,7 @@ async function send() {
   autoGrow();
   appendUser(text);
   messages.push({ role: "user", content: text });
-  const thinkTurn = thinkingEnabled && chat.thinkCloseTokenId != null;
-  chat.chatTemplateArgs = {
-    enable_thinking: thinkingEnabled,
-    preserve_thinking: true,
-  };
+  const thinkTurn = thinkingEnabled;
   const msg = appendAssistant(thinkTurn);
   const tBlock = msg.querySelector(".t-block");
   const tBody = msg.querySelector(".t-body");
@@ -191,7 +187,6 @@ async function send() {
   const aBody = msg.querySelector(".a-body");
   setGenerating(true);
   abortController = new AbortController();
-  const closeId = chat.thinkCloseTokenId;
   let phase = thinkTurn ? "think" : "answer";
   let thinking = "",
     answer = "",
@@ -214,25 +209,30 @@ async function send() {
     setStatus("busy", "WRITING …");
   };
   try {
-    for await (const tok of chat.generate(messages, {
+    for await (const event of chat.streamTurn(messages, {
       signal: abortController.signal,
+      think: thinkTurn,
     })) {
       const now = performance.now();
+      if (event.type === "complete") {
+        tokens = event.result.tokens.length;
+        continue;
+      }
       if (!firstTokenAt) firstTokenAt = now;
-      if (tok.token !== null) tokens++;
-      if (phase === "think") {
-        if (tok.token === closeId) {
+      tokens++;
+      if (event.type === "thinking") {
+        thinking += event.delta;
+        scheduleStream(() => {
+          tBody.textContent = thinking;
+          tBody.scrollTop = tBody.scrollHeight;
+        });
+      } else if (event.type === "text") {
+        if (phase === "think") {
           phase = "answer";
           finishThinking();
-        } else {
-          thinking += tok.delta;
-          scheduleStream(() => {
-            tBody.textContent = thinking;
-            tBody.scrollTop = tBody.scrollHeight;
-          });
         }
-      } else {
-        answer += answer === "" ? tok.delta.replace(/^\s+/, "") : tok.delta;
+        answer +=
+          answer === "" ? event.delta.replace(/^\s+/, "") : event.delta;
         scheduleStream(() => renderAnswer(aBody, answer, true));
       }
       updateLiveStat({ startedAt, firstTokenAt, now, tokens });

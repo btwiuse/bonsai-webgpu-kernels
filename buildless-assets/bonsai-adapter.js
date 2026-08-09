@@ -5,46 +5,21 @@
 import { createEngine } from "https://cdn.jsdelivr.net/npm/bitgpu@0.19.1/dist/index.js";
 import { createChat } from "https://cdn.jsdelivr.net/npm/bitgpu@0.19.1/dist/chat.js";
 import { fromGguf } from "https://cdn.jsdelivr.net/npm/bitgpu@0.19.1/dist/gguf.js";
+import {
+  BONSAI_27B,
+  resolveGgufUrl,
+  tokenizerDirectory,
+} from "./model-catalog.js";
+import { createModelFetch } from "./model-fetch.js";
+import { streamChatEvents } from "./chat-events.js";
 
-export const DEFAULT_MODEL_ID = "prism-ml/Bonsai-27B-gguf";
-export const DEFAULT_GGUF_FILE = "Bonsai-27B-Q1_0.gguf";
+export const DEFAULT_MODEL_ID = BONSAI_27B.id;
+export const DEFAULT_GGUF_FILE = BONSAI_27B.ggufFile;
+export { resolveGgufUrl as resolveGGUFUrl } from "./model-catalog.js";
 
 const DEFAULT_CONTEXT_LENGTH = 4096;
 const BITGPU_ENGINE_URL =
   "https://cdn.jsdelivr.net/npm/bitgpu@0.19.1/dist/index.js";
-
-function isHttpUrl(value) {
-  return /^https?:/i.test(value);
-}
-
-export function resolveGGUFUrl(
-  source = DEFAULT_MODEL_ID,
-  file = DEFAULT_GGUF_FILE,
-  revision = "main",
-) {
-  if (source.toLowerCase().endsWith(".gguf")) {
-    return isHttpUrl(source) ? source : new URL(source, location.href).href;
-  }
-
-  return `https://huggingface.co/${source}/resolve/${revision}/${file}`;
-}
-
-function modelDirectory(ggufUrl) {
-  return ggufUrl.slice(0, ggufUrl.lastIndexOf("/"));
-}
-
-function makeAuthenticatedFetch(accessToken, signal) {
-  return async (url, init = {}) => {
-    const headers = new Headers(init.headers);
-    if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
-
-    const response = await fetch(url, { ...init, headers, signal });
-    if (!response.ok) {
-      throw new Error(`Request for ${url} failed: HTTP ${response.status}`);
-    }
-    return response;
-  };
-}
 
 function createProgressReporter(onProgress) {
   return (progress) => {
@@ -122,8 +97,6 @@ class BonsaiChat {
     this.contextLength = engine.capabilities.maxSeqLen;
     this.contextFull = false;
     this.lastAssistantContent = null;
-    this.chatTemplateArgs = {};
-    this.thinkCloseTokenId = nativeChat.tokenizer.tokenToId("</think>") ?? null;
 
     // bitgpu keeps the source catalogue private, so expose the pinned distribution's WGSL
     // source table through the UI's existing kernel inspector contract.
@@ -136,71 +109,24 @@ class BonsaiChat {
     this.lastAssistantContent = null;
   }
 
-  async *generate(messages, { signal } = {}) {
-    const thinkingEnabled = this.chatTemplateArgs.enable_thinking === true;
-    const events = [];
-    let wake = null;
-    let finished = false;
-    let failure = null;
-    let sentThinkClose = !thinkingEnabled;
-
-    const push = (event) => {
-      events.push(event);
-      wake?.();
-      wake = null;
-    };
-
-    const producer = (async () => {
-      try {
-        const stream = this.nativeChat.stream(messages, {
-          signal,
-          think: thinkingEnabled,
-          onThink: (delta) => {
-            if (delta) push({ token: 1, delta });
-          },
-        });
-
-        let result;
-        for (;;) {
-          const next = await stream.next();
-          if (next.done) {
-            result = next.value;
-            break;
-          }
-
-          if (!sentThinkClose) {
-            push({ token: this.thinkCloseTokenId, delta: "" });
-            sentThinkClose = true;
-          }
-          if (next.value) push({ token: 1, delta: next.value });
+  async *streamTurn(messages, options = {}) {
+    try {
+      for await (const event of streamChatEvents(
+        this.nativeChat,
+        messages,
+        options,
+      )) {
+        if (event.type === "complete") {
+          this.lastAssistantContent = event.result.text;
         }
-
-        if (!sentThinkClose) push({ token: this.thinkCloseTokenId, delta: "" });
-        this.lastAssistantContent = result.text;
-      } catch (error) {
-        if (/maxSeqLen|context/i.test(String(error?.message ?? error))) {
-          this.contextFull = true;
-        }
-        failure = error;
-      } finally {
-        finished = true;
-        wake?.();
-        wake = null;
+        yield event;
       }
-    })();
-
-    while (!finished || events.length > 0) {
-      if (events.length > 0) {
-        yield events.shift();
-      } else {
-        await new Promise((resolve) => {
-          wake = resolve;
-        });
+    } catch (error) {
+      if (/maxSeqLen|context/i.test(String(error?.message ?? error))) {
+        this.contextFull = true;
       }
+      throw error;
     }
-
-    await producer;
-    if (failure) throw failure;
   }
 }
 
@@ -228,17 +154,16 @@ export class Bonsai27B {
 
   static async load(source = DEFAULT_MODEL_ID, options = {}) {
     const onProgress = options.onProgress ?? (() => {});
-    const ggufUrl = resolveGGUFUrl(source, options.file, options.revision);
-    const request = makeAuthenticatedFetch(options.accessToken, options.signal);
+    const ggufUrl = resolveGgufUrl(source, options.file);
+    const request = createModelFetch({
+      accessToken: options.accessToken,
+      cache: options.cache,
+      signal: options.signal,
+    });
 
     onProgress({ status: "init", message: "Parsing GGUF header" });
     const gguf = await fromGguf(ggufUrl, {
-      fetchRange: async (url, offset, length) => {
-        const response = await request(url, {
-          headers: { Range: `bytes=${offset}-${offset + length - 1}` },
-        });
-        return response.arrayBuffer();
-      },
+      fetchRange: request.fetchRange,
     });
 
     onProgress({ status: "init", message: "Requesting WebGPU device" });
@@ -248,18 +173,13 @@ export class Bonsai27B {
       maxSeqLen: options.maxLength ?? DEFAULT_CONTEXT_LENGTH,
       kvCache: "q8",
       onProgress: createProgressReporter(onProgress),
-      fetchStream: async (url) => {
-        const response = await request(url);
-        if (!response.body)
-          throw new Error(`Response body for ${url} is unavailable.`);
-        return response.body;
-      },
+      fetchStream: request.fetchStream,
     });
 
     onProgress({ status: "tokenizer", message: "Loading tokenizer" });
     const nativeChat = await createChat(engine, {
-      modelUrl: modelDirectory(ggufUrl),
-      fetchJson: async (url) => (await request(url)).json(),
+      modelUrl: tokenizerDirectory(source, ggufUrl),
+      fetchJson: request.fetchJson,
     });
 
     const kernelSources = await loadKernelSources();
