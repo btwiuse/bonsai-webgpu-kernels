@@ -34,8 +34,7 @@ export const PrismFrameMethods = {
     this.camera.aspect = aspect;
     this.camZ = Math.min(9.6 / Math.min(1, aspect / 1.15), 15.5);
     this.camera.updateProjectionMatrix();
-    const halfH =
-      Math.tan((this.camera.fov / 2) * Math.PI / 180) * this.camZ;
+    const halfH = Math.tan((this.camera.fov / 2) * Math.PI / 180) * this.camZ;
     this.viewX.right = halfH * aspect + 1.2;
     this.viewX.left = -this.viewX.right;
   },
@@ -69,8 +68,7 @@ export const PrismFrameMethods = {
     }
     const amp = this.autoAmp;
     return {
-      rotZ:
-        (Math.sin(tA * 0.31) * 0.15 + Math.sin(tA * 0.127) * 0.06) * amp +
+      rotZ: (Math.sin(tA * 0.31) * 0.15 + Math.sin(tA * 0.127) * 0.06) * amp +
         this.userZ,
       rotY: Math.sin(tA * 0.21) * 0.32 * amp + this.userY,
       rotX: (Math.sin(tA * 0.165) * 0.09 + 0.02) * amp + this.userX,
@@ -87,15 +85,17 @@ export const PrismFrameMethods = {
     this.apexDot.position.copy(this.APEX_W);
     this.apexDot.material.opacity = 0.9 * lamp;
     for (let i = 0; i < 2; i++) {
-      this.APEX_W.copy(this.CORNER_LOCAL[i]).applyMatrix4(this.prism.matrixWorld);
+      this.APEX_W.copy(this.CORNER_LOCAL[i]).applyMatrix4(
+        this.prism.matrixWorld,
+      );
       this.cornerDots[i].position.copy(this.APEX_W);
-      this.cornerDots[i].material.opacity =
-        lamp * (0.35 + 0.25 * Math.sin(tA * 2 + i * 2.1));
+      this.cornerDots[i].material.opacity = lamp *
+        (0.35 + 0.25 * Math.sin(tA * 2 + i * 2.1));
     }
     this.glassMat.uniforms.uTime.value = tA;
     this.glassMat.uniforms.uCam.value.copy(this.camera.position);
-    this.edgeMat.opacity =
-      0.45 + 0.08 * Math.sin(tA * 1.3) + this.trapGlow * 0.3;
+    this.edgeMat.opacity = 0.45 + 0.08 * Math.sin(tA * 1.3) +
+      this.trapGlow * 0.3;
     if (!this.dragging) {
       this.parTX = this.mouseNX * 0.38;
       this.parTY = -this.mouseNY * 0.22;

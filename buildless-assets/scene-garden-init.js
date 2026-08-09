@@ -3,12 +3,12 @@
 //
 // Composed into GardenScene.prototype by `scene-garden-class.js`.
 
-import { SC, TAU, clamp, lerp, MOT } from "./scene-garden-utils.js";
+import { clamp, lerp, MOT, SC, TAU } from "./scene-garden-utils.js";
 import {
-  groundTex,
-  shadowTex,
-  petalTex,
   glowTex,
+  groundTex,
+  petalTex,
+  shadowTex,
 } from "./scene-garden-assets.js";
 import { TreeBuilder } from "./scene-garden-tree.js";
 

@@ -222,8 +222,8 @@ class BackgroundScene {
     const tA = this.t * this.spd;
     this.dustMat.uniforms.uTime.value = tA;
     this.textMat.opacity = 0.05 + 0.02 * (0.5 + 0.5 * Math.sin(tA * 0.35));
-    this.backlight.material.opacity =
-      0.06 + 0.02 * (0.5 + 0.5 * Math.sin(tA * 0.6));
+    this.backlight.material.opacity = 0.06 +
+      0.02 * (0.5 + 0.5 * Math.sin(tA * 0.6));
     this.camera.position.set(
       Math.sin(tA * 0.13) * 0.15,
       0.35 + Math.cos(tA * 0.1) * 0.08,

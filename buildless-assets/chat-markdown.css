@@ -86,13 +86,13 @@
 }
 .t-block.live .t-body {
   border-image: linear-gradient(
-      180deg,
-      #ff4f58,
-      #ffd76a,
-      #53e6a6,
-      #4fa8ff,
-      #8b6bff
-    )
+    180deg,
+    #ff4f58,
+    #ffd76a,
+    #53e6a6,
+    #4fa8ff,
+    #8b6bff
+  )
     1;
 }
 .t-body::-webkit-scrollbar {

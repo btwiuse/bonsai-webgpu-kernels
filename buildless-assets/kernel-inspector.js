@@ -1,60 +1,60 @@
 const WGSL_KEYWORDS = new Set([
-    "fn",
-    "let",
-    "var",
-    "const",
-    "const_assert",
-    "struct",
-    "if",
-    "else",
-    "for",
-    "loop",
-    "return",
-    "break",
-    "continue",
-    "switch",
-    "case",
-    "default",
-    "while",
-    "override",
-    "enable",
-    "requires",
-    "discard",
-    "alias",
-    "true",
-    "false",
-    "workgroup",
-    "storage",
-    "uniform",
-    "function",
-    "private",
-    "read",
-    "write",
-    "read_write",
-    "bitcast",
+  "fn",
+  "let",
+  "var",
+  "const",
+  "const_assert",
+  "struct",
+  "if",
+  "else",
+  "for",
+  "loop",
+  "return",
+  "break",
+  "continue",
+  "switch",
+  "case",
+  "default",
+  "while",
+  "override",
+  "enable",
+  "requires",
+  "discard",
+  "alias",
+  "true",
+  "false",
+  "workgroup",
+  "storage",
+  "uniform",
+  "function",
+  "private",
+  "read",
+  "write",
+  "read_write",
+  "bitcast",
 ]);
 const WGSL_TYPES = new Set([
-    "u32",
-    "i32",
-    "f32",
-    "f16",
-    "bool",
-    "vec2",
-    "vec3",
-    "vec4",
-    "mat2x2",
-    "mat3x3",
-    "mat4x4",
-    "mat2x3",
-    "mat3x2",
-    "mat2x4",
-    "mat4x2",
-    "mat3x4",
-    "mat4x3",
-    "array",
-    "atomic",
-    "ptr",
-    "sampler",
+  "u32",
+  "i32",
+  "f32",
+  "f16",
+  "bool",
+  "vec2",
+  "vec3",
+  "vec4",
+  "mat2x2",
+  "mat3x3",
+  "mat4x4",
+  "mat2x3",
+  "mat3x2",
+  "mat2x4",
+  "mat4x2",
+  "mat3x4",
+  "mat4x3",
+  "array",
+  "atomic",
+  "ptr",
+  "sampler",
 ]);
 const WGSL_TOKEN =
   /(\/\/[^\n]*|\/\*[\s\S]*?\*\/)|(@[A-Za-z_]\w*)|([A-Za-z_]\w*)|(\d[\w.]*)|(\s+)|([\s\S])/g;
@@ -83,8 +83,8 @@ function highlightWgsl(src) {
       const cls = WGSL_KEYWORDS.has(ident)
         ? "k-kw"
         : WGSL_TYPES.has(ident)
-          ? "k-ty"
-          : null;
+        ? "k-ty"
+        : null;
       out += cls ? `<span class="${cls}">${ident}</span>` : escapeHtml(ident);
     } else if (num) out += `<span class="k-nu">${escapeHtml(num)}</span>`;
     else if (ws) out += ws;
@@ -165,8 +165,7 @@ export class KernelInspector {
 
   updateListFade() {
     const list = this.$("kxList");
-    const atEnd =
-      list.scrollHeight <= list.clientHeight + 4 ||
+    const atEnd = list.scrollHeight <= list.clientHeight + 4 ||
       list.scrollTop >= list.scrollHeight - list.clientHeight - 4;
     list.parentElement.classList.toggle("at-end", atEnd);
   }
@@ -178,7 +177,7 @@ export class KernelInspector {
     $("kxIntro").hidden = true;
     $("kxSource").hidden = false;
     [...$("kxList").children].forEach((el, j) =>
-      el.classList.toggle("active", j === index),
+      el.classList.toggle("active", j === index)
     );
     $("kxName").textContent = kernel.name;
     $("kxLines").textContent = `${kernel.source.split("\n").length} LINES`;

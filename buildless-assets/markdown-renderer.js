@@ -13,7 +13,8 @@ Promise.all([
     marked.use({ gfm: true, breaks: true });
     katexLib = katexModule.default ?? katexModule;
     const domPurify = domPurifyModule.default ?? domPurifyModule;
-    sanitizeHtml = (html) => domPurify.sanitize(html, { USE_PROFILES: { html: true } });
+    sanitizeHtml = (html) =>
+      domPurify.sanitize(html, { USE_PROFILES: { html: true } });
     marked.use(makeKatexExtension());
     ensureKatexCss();
   })
@@ -85,10 +86,12 @@ function stashKatex(text, display) {
 }
 function trimIncompleteMath(text) {
   let cut = -1;
-  for (const [open, close] of [
-    ["\\[", "\\]"],
-    ["\\(", "\\)"],
-  ]) {
+  for (
+    const [open, close] of [
+      ["\\[", "\\]"],
+      ["\\(", "\\)"],
+    ]
+  ) {
     const lastOpen = text.lastIndexOf(open);
     if (lastOpen !== -1 && text.indexOf(close, lastOpen + open.length) === -1) {
       if (cut === -1 || lastOpen < cut) cut = lastOpen;
@@ -107,8 +110,9 @@ function trimIncompleteMath(text) {
   return cut === -1 ? text : text.slice(0, cut);
 }
 export function renderAnswer(el, raw, withCaret) {
-  const text =
-    withCaret && katexLib ? trimIncompleteMath(raw || "") : raw || "";
+  const text = withCaret && katexLib
+    ? trimIncompleteMath(raw || "")
+    : raw || "";
   if (marked && sanitizeHtml) {
     try {
       katexFragments = [];
@@ -144,14 +148,18 @@ function appendCaret(el) {
   let host = el;
   for (;;) {
     let tail = host.lastChild;
-    while (tail && tail.nodeType === Node.TEXT_NODE && !tail.textContent.trim())
+    while (
+      tail && tail.nodeType === Node.TEXT_NODE && !tail.textContent.trim()
+    ) {
       tail = tail.previousSibling;
+    }
     if (
       !tail ||
       tail.nodeType !== Node.ELEMENT_NODE ||
       !DESCEND.test(tail.tagName)
-    )
+    ) {
       break;
+    }
     host = tail;
   }
   host.appendChild(caret);

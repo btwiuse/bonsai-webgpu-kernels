@@ -2,7 +2,14 @@
 //
 // Composed into GardenScene.prototype by `scene-garden-class.js`.
 
-import { TAU, clamp, lerp, easeOutCubic, easeOutBack, MOT } from "./scene-garden-utils.js";
+import {
+  clamp,
+  easeOutBack,
+  easeOutCubic,
+  lerp,
+  MOT,
+  TAU,
+} from "./scene-garden-utils.js";
 
 const PET_N = 110;
 
@@ -70,10 +77,9 @@ export const GardenUpdateMethods = {
       } else {
         petal.fallSpeed = Math.min(petal.fallSpeed + dt * 0.15, 0.5);
         petal.position.y -= petal.fallSpeed * dt;
-        petal.position.x +=
-          (Math.sin(t * 1.2 + petal.phase) * 0.35 +
-            this.wind * 0.45 +
-            this.gustX * 1.1) *
+        petal.position.x += (Math.sin(t * 1.2 + petal.phase) * 0.35 +
+          this.wind * 0.45 +
+          this.gustX * 1.1) *
           dt;
         petal.position.z +=
           (Math.cos(t * 0.9 + petal.phase) * 0.18 + this.gustZ * 1.1) * dt;
@@ -82,8 +88,7 @@ export const GardenUpdateMethods = {
         petal.rotation.z += petal.spin.z * dt;
         petal.life += dt;
         if (petal.position.y < 0.03) petal.active = false;
-        const fade =
-          Math.min(1, (petal.position.y - 0.02) * 4) *
+        const fade = Math.min(1, (petal.position.y - 0.02) * 4) *
           Math.min(1, petal.life * 3);
         this.dummy.position.copy(petal.position);
         this.dummy.rotation.copy(petal.rotation);
@@ -180,8 +185,8 @@ export const GardenUpdateMethods = {
         pad.popTime = 0;
       }
       const pop = pad.popTime ? Math.exp(-(t - pad.popTime) * 3.5) * 0.32 : 0;
-      pad.spriteMaterial.opacity =
-        (0.17 * pad.growth + pop) * (1 + pulse * 0.8);
+      pad.spriteMaterial.opacity = (0.17 * pad.growth + pop) *
+        (1 + pulse * 0.8);
       if (pad.growth > 0) {
         const lag = Math.min(1, dt * (2.2 + (pad.phase % 1.7)));
         pad.swayX += (this.leanX - pad.swayX) * lag;
@@ -189,8 +194,7 @@ export const GardenUpdateMethods = {
         const jig = Math.sin(t * 13 + pad.phase * 3) * this.shakeAmp;
         pad.group.position.x = pad.base.x + pad.swayX * 0.16 + jig * 0.06;
         pad.group.position.z = pad.base.z + pad.swayZ * 0.16 + jig * 0.03;
-        pad.group.position.y =
-          pad.base.y +
+        pad.group.position.y = pad.base.y +
           Math.sin(t * 0.7 + pad.phase) * 0.02 * pad.growth * MOT +
           Math.abs(jig) * 0.05;
       }
@@ -207,8 +211,7 @@ export const GardenUpdateMethods = {
       Math.sin(t * 0.6) * 0.005 * (0.6 + 0.4 * gust) * MOT -
       this.leanX * 0.055 +
       wobble * 0.02;
-    this.tree.group.rotation.x =
-      Math.sin(t * 0.43 + 1) * 0.004 * MOT +
+    this.tree.group.rotation.x = Math.sin(t * 0.43 + 1) * 0.004 * MOT +
       this.leanZ * 0.055 +
       wobble * 0.012;
   },

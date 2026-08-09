@@ -107,7 +107,7 @@ class ModelAccess {
       requestAnimationFrame(() => {
         this.gate.classList.add("show");
         this.gateInput.focus();
-      }),
+      })
     );
   }
 
@@ -260,11 +260,11 @@ class ModelAccess {
     BonsaiLoader.phase("LOAD FAILED");
     this.byId("loadErrorMsg").textContent = message;
     this.byId("loadError").hidden = false;
-    const authIssue =
-      this.requireToken &&
-      /\b40[134]\b|unauthorized|forbidden|invalid token|\btoken\b|repository not found|access (denied|restricted|to model)/i.test(
-        message,
-      );
+    const authIssue = this.requireToken &&
+      /\b40[134]\b|unauthorized|forbidden|invalid token|\btoken\b|repository not found|access (denied|restricted|to model)/i
+        .test(
+          message,
+        );
     this.byId("changeTokenBtn").hidden = !authIssue;
   }
 
@@ -293,7 +293,8 @@ class ModelAccess {
       const chat = await this.Bonsai27B.load(this.modelSource, {
         ...this.modelOptions(),
         cache: this.query.has("nocache") ? false : undefined,
-        maxLength: Number.parseInt(this.query.get("ctx") ?? "", 10) || undefined,
+        maxLength: Number.parseInt(this.query.get("ctx") ?? "", 10) ||
+          undefined,
         overflow: this.query.get("overflow") === "sinks" ? "sinks" : undefined,
         onProgress: (event) => this.onLoadProgress(event),
       });

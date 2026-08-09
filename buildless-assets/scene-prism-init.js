@@ -4,16 +4,16 @@
 // Composed into PrismScene.prototype by `scene-prism-class.js`.
 
 import {
-  R,
-  DEPTH,
   COL_COUNT,
+  DEPTH,
   EXIT_ROWS,
-  INNER_ROWS,
   INC_N,
-  REF_N,
-  RES_N,
+  INNER_ROWS,
   PULSE_COUNT,
   PULSE_W,
+  R,
+  REF_N,
+  RES_N,
 } from "./scene-prism-constants.js";
 import { specColor } from "./scene-prism-optics.js";
 import { pulseHex } from "./scene-prism-pulse.js";
@@ -25,7 +25,7 @@ import {
   createSheetMaterial,
 } from "./scene-prism-geometry.js";
 import { makeTraceRec } from "./scene-prism-trace.js";
-import { GLASS_VERT, GLASS_FRAG } from "./scene-prism-shaders.js";
+import { GLASS_FRAG, GLASS_VERT } from "./scene-prism-shaders.js";
 import { makeGlowTexture, makeWordTexture } from "./scene-prism-textures.js";
 
 const WHITE = 0xffffff;
@@ -53,7 +53,12 @@ function spriteFactory(self) {
   };
 }
 
-function makeBeam(scene, n, hex, { width = 0.05, opacity = 1, tailFade = 0, order = 6 } = {}) {
+function makeBeam(
+  scene,
+  n,
+  hex,
+  { width = 0.05, opacity = 1, tailFade = 0, order = 6 } = {},
+) {
   const { geo, pos, tan, posAttr, tanAttr } = createBeamGeometry(n);
   const mat = createBeamMaterial(hex, width, opacity, tailFade);
   const mesh = new THREE.Mesh(geo, mat);
@@ -92,11 +97,20 @@ function makeBeam(scene, n, hex, { width = 0.05, opacity = 1, tailFade = 0, orde
   return { mat, update };
 }
 
-function makeSheet(scene, cols, rows, { opacity, headWhite, headK, alongBase, alongK, order = 6 }) {
+function makeSheet(
+  scene,
+  cols,
+  rows,
+  { opacity, headWhite, headK, alongBase, alongK, order = 6 },
+) {
   const { geo, pos, aAlpha, aRev, posAttr, aAttr, revAttr } =
     createSheetGeometry(cols, rows);
   const mat = createSheetMaterial({
-    opacity, headWhite, headK, alongBase, alongK,
+    opacity,
+    headWhite,
+    headK,
+    alongBase,
+    alongK,
   });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
@@ -112,7 +126,10 @@ function makeSheet(scene, cols, rows, { opacity, headWhite, headK, alongBase, al
     for (let k = 0; k < rows; k++) arr[k * cols + c] = v;
   };
   return {
-    mat, cols, rows, pos,
+    mat,
+    cols,
+    rows,
+    pos,
     setPoint,
     setAlpha: (c, v) => setColumnScalar(aAlpha, c, v),
     setRev: (c, v) => setColumnScalar(aRev, c, v),
@@ -187,7 +204,10 @@ export const PrismInitMethods = {
         uTime: { value: 0 },
         uPlane: {
           value: new THREE.Vector4(
-            this.TP.cx, this.TP.cy, this.TP.hw, this.TP.hh,
+            this.TP.cx,
+            this.TP.cy,
+            this.TP.hw,
+            this.TP.hh,
           ),
         },
         uPlaneZ: { value: this.TP.z },
@@ -219,12 +239,19 @@ export const PrismInitMethods = {
     this.INC_PTS = vecArray(INC_N);
     this.REF_PTS = vecArray(REF_N);
     this.RES_PTS = vecArray(RES_N);
-    this.incoming = makeBeam(this.scene, INC_N, WHITE, { width: 0.06, opacity: 0.95 });
+    this.incoming = makeBeam(this.scene, INC_N, WHITE, {
+      width: 0.06,
+      opacity: 0.95,
+    });
     this.reflectBeam = makeBeam(this.scene, REF_N, WHITE, {
-      width: 0.04, opacity: 0.09, tailFade: 1,
+      width: 0.04,
+      opacity: 0.09,
+      tailFade: 1,
     });
     this.residualBeam = makeBeam(this.scene, RES_N, WHITE, {
-      width: 0.045, opacity: 0.1, tailFade: 1,
+      width: 0.045,
+      opacity: 0.1,
+      tailFade: 1,
     });
     this.allBeams = [this.incoming, this.reflectBeam, this.residualBeam];
   },
@@ -232,10 +259,18 @@ export const PrismInitMethods = {
   // Spectral fan sheets: one inside the prism, one extending out.
   initSheets() {
     this.exitSheet = makeSheet(this.scene, COL_COUNT, EXIT_ROWS, {
-      opacity: 0.92, headWhite: 0.55, headK: 5.5, alongBase: 0.34, alongK: 1.5,
+      opacity: 0.92,
+      headWhite: 0.55,
+      headK: 5.5,
+      alongBase: 0.34,
+      alongK: 1.5,
     });
     this.innerSheet = makeSheet(this.scene, COL_COUNT, INNER_ROWS, {
-      opacity: 0.3, headWhite: 0.65, headK: 4, alongBase: 0.55, alongK: 0.9,
+      opacity: 0.3,
+      headWhite: 0.65,
+      headK: 4,
+      alongBase: 0.55,
+      alongK: 0.9,
     });
   },
 
@@ -264,17 +299,19 @@ export const PrismInitMethods = {
 
   // Light pulses travelling along the spectral fan, plus wash sprites.
   initPulses() {
-    this.whitePulses = Array.from({ length: PULSE_COUNT }, () =>
-      makeSprite(this.scene, this.glowTex, WHITE, 0.085, 0, 9),
+    this.whitePulses = Array.from(
+      { length: PULSE_COUNT },
+      () => makeSprite(this.scene, this.glowTex, WHITE, 0.085, 0, 9),
     );
     this.colorPulses = PULSE_W.map((w) => {
       const hex = pulseHex(w);
-      return Array.from({ length: PULSE_COUNT }, () =>
-        makeSprite(this.scene, this.glowTex, hex, 0.075, 0, 9),
+      return Array.from(
+        { length: PULSE_COUNT },
+        () => makeSprite(this.scene, this.glowTex, hex, 0.075, 0, 9),
       );
     });
     this.washes = PULSE_W.map((w) =>
-      makeSprite(this.scene, this.glowTex, pulseHex(w), 5.5, 0, 2),
+      makeSprite(this.scene, this.glowTex, pulseHex(w), 5.5, 0, 2)
     );
     this.SAMP = new THREE.Vector3();
     this.APEX_LOCAL = new THREE.Vector3(0, R, DEPTH / 2 + 0.02);
@@ -337,10 +374,14 @@ export const PrismInitMethods = {
       this.userX = Math.max(-0.3, Math.min(0.3, this.userX + dy * 0.0035));
       const nowMs = performance.now();
       this.velTrail.push({
-        t: nowMs, x: this.userX, y: this.userY, z: this.userZ,
+        t: nowMs,
+        x: this.userX,
+        y: this.userY,
+        z: this.userZ,
       });
-      while (this.velTrail.length > 2 && nowMs - this.velTrail[0].t > 120)
+      while (this.velTrail.length > 2 && nowMs - this.velTrail[0].t > 120) {
         this.velTrail.shift();
+      }
       this.lastInteract = this.tGlobal;
     });
     window.addEventListener("pointerup", () => this.endDrag());

@@ -7,8 +7,8 @@ import { COL_COUNT } from "./scene-prism-constants.js";
 // Calibrated so n(650 nm) = 1.115 and n(410 nm) = 1.228.
 const L_RED = 650;
 const L_VIOLET = 410;
-const CAU_B =
-  (1.228 - 1.115) / (1 / (L_VIOLET * L_VIOLET) - 1 / (L_RED * L_RED));
+const CAU_B = (1.228 - 1.115) /
+  (1 / (L_VIOLET * L_VIOLET) - 1 / (L_RED * L_RED));
 const CAU_A = 1.115 - CAU_B / (L_RED * L_RED);
 
 const lambdaOf = (w) => L_RED + (L_VIOLET - L_RED) * w;
@@ -19,8 +19,9 @@ const nOf = (w) => {
 };
 
 // Pre-computed refractive indices for each fan column.
-export const N_COL = Array.from({ length: COL_COUNT }, (_, c) =>
-  nOf(c / (COL_COUNT - 1)),
+export const N_COL = Array.from(
+  { length: COL_COUNT },
+  (_, c) => nOf(c / (COL_COUNT - 1)),
 );
 
 // Approximate sRGB color from wavelength in nanometers.
@@ -51,12 +52,11 @@ function waveColor(l) {
     g = 0;
     b = 0;
   }
-  const f =
-    l < 420
-      ? 0.45 + (0.55 * (l - 395)) / 25
-      : l > 645
-        ? 0.5 + (0.5 * (700 - l)) / 55
-        : 1;
+  const f = l < 420
+    ? 0.45 + (0.55 * (l - 395)) / 25
+    : l > 645
+    ? 0.5 + (0.5 * (700 - l)) / 55
+    : 1;
   return [r * f, g * f, b * f];
 }
 

@@ -12,13 +12,12 @@ const modelRuntime = useWorkerRuntime ? WorkerBonsai27B : Bonsai27B;
 // so the page behaves identically without these query parameters.
 const thinkBudgetRaw = queryParams.get("thinkBudget");
 const parsedThinkBudget = Number.parseInt(thinkBudgetRaw ?? "", 10);
-const thinkBudget =
-  thinkBudgetRaw !== null &&
-  thinkBudgetRaw.trim() !== "" &&
-  Number.isFinite(parsedThinkBudget) &&
-  parsedThinkBudget >= 0
-    ? parsedThinkBudget
-    : undefined;
+const thinkBudget = thinkBudgetRaw !== null &&
+    thinkBudgetRaw.trim() !== "" &&
+    Number.isFinite(parsedThinkBudget) &&
+    parsedThinkBudget >= 0
+  ? parsedThinkBudget
+  : undefined;
 const thinkEarlyStop = queryParams.has("thinkEarlyStop")
   ? queryParams.get("thinkEarlyStop") !== "off"
   : undefined;
@@ -61,8 +60,11 @@ const modelAccess = setupModelAccess({
 });
 BonsaiLoader.onReady(() => setTimeout(enterChat, 1800));
 function enterChat() {
-  if (!modelAccess.isReady() || document.body.classList.contains("stage-chat"))
+  if (
+    !modelAccess.isReady() || document.body.classList.contains("stage-chat")
+  ) {
     return;
+  }
   document.body.classList.add("stage-chat");
   chatx.classList.add("show");
   setStatus("", "READY");
@@ -113,8 +115,8 @@ cInput.addEventListener("keydown", (e) => {
   }
 });
 function refreshSend() {
-  cSend.disabled =
-    isGenerating || contextExhausted || !chat || cInput.value.trim() === "";
+  cSend.disabled = isGenerating || contextExhausted || !chat ||
+    cInput.value.trim() === "";
 }
 function autoGrow() {
   cInput.style.height = "auto";
@@ -184,8 +186,8 @@ function appendAssistant(withThinking) {
   msg.innerHTML = `
     <div class="c-role">BONSAI</div>
     ${
-      withThinking
-        ? `
+    withThinking
+      ? `
     <div class="t-block live open">
       <button class="t-head" type="button">
         <span class="t-chev">&#9654;</span>
@@ -193,8 +195,8 @@ function appendAssistant(withThinking) {
       </button>
       <div class="t-body"></div>
     </div>`
-        : ""
-    }
+      : ""
+  }
     <div class="a-body"></div>`;
   const tBlock = msg.querySelector(".t-block");
   tBlock?.querySelector(".t-head").addEventListener("click", () => {
@@ -258,8 +260,9 @@ function consumeTurnEvent(event, turn) {
       turn.phase = "answer";
       finishThinking(turn);
     }
-    turn.answer +=
-      turn.answer === "" ? event.delta.replace(/^\s+/, "") : event.delta;
+    turn.answer += turn.answer === ""
+      ? event.delta.replace(/^\s+/, "")
+      : event.delta;
     scheduleStream(() => renderAnswer(turn.aBody, turn.answer, true));
   }
   updateLiveStat({
@@ -326,12 +329,14 @@ async function send() {
   setGenerating(true);
   abortController = new AbortController();
   try {
-    for await (const event of chat.streamTurn(messages, {
-      signal: abortController.signal,
-      think: thinkTurn,
-      thinkBudget,
-      thinkEarlyStop,
-    })) {
+    for await (
+      const event of chat.streamTurn(messages, {
+        signal: abortController.signal,
+        think: thinkTurn,
+        thinkBudget,
+        thinkEarlyStop,
+      })
+    ) {
       consumeTurnEvent(event, turn);
     }
   } catch (error) {
@@ -344,7 +349,8 @@ function lockContextFull(msg) {
   contextExhausted = true;
   const note = document.createElement("div");
   note.className = "a-ctxfull";
-  note.textContent = `CONTEXT WINDOW FULL · ${chat.contextLength} TOKENS — PRESS CLEAR TO START FRESH`;
+  note.textContent =
+    `CONTEXT WINDOW FULL · ${chat.contextLength} TOKENS — PRESS CLEAR TO START FRESH`;
   msg.appendChild(note);
   cInput.disabled = true;
   cInput.placeholder = "Context window full — press CLEAR to start fresh";
@@ -358,15 +364,23 @@ function appendMeta(
 ) {
   if (tokens <= 0) return;
   const parts = [`${tokens} TOK`];
-  if (thinkEndedAt)
+  if (thinkEndedAt) {
     parts.push(
-      `THOUGHT ${((thinkEndedAt - (firstTokenAt || startedAt)) / 1e3).toFixed(1)}S`,
+      `THOUGHT ${
+        ((thinkEndedAt - (firstTokenAt || startedAt)) / 1e3).toFixed(1)
+      }S`,
     );
-  if (firstTokenAt)
+  }
+  if (firstTokenAt) {
     parts.push(`TTFT ${(firstTokenAt - startedAt).toFixed(0)} MS`);
+  }
   if (tokens > 5 && firstTokenAt) {
     parts.push(
-      `${((tokens - 1) / Math.max((endedAt - firstTokenAt) / 1e3, 1e-9)).toFixed(1)} TOK/S`,
+      `${
+        ((tokens - 1) / Math.max((endedAt - firstTokenAt) / 1e3, 1e-9)).toFixed(
+          1,
+        )
+      } TOK/S`,
     );
   }
   const meta = document.createElement("div");
@@ -384,7 +398,9 @@ function updateLiveStat({ startedAt, firstTokenAt, now, tokens }) {
   }
   if (now - lastLiveStatAt < LIVE_STAT_MS) return;
   lastLiveStatAt = now;
-  cLive.textContent = `${((tokens - 1) / Math.max((now - firstTokenAt) / 1e3, 1e-9)).toFixed(0)} TOK/S`;
+  cLive.textContent = `${
+    ((tokens - 1) / Math.max((now - firstTokenAt) / 1e3, 1e-9)).toFixed(0)
+  } TOK/S`;
 }
 const STREAM_RENDER_MS = 33;
 let streamPaint = null,

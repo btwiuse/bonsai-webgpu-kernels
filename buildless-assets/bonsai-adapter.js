@@ -54,7 +54,9 @@ async function resolveModelSource(source, ggufUrl, request, onProgress) {
   const useOfficialManifest = source === BONSAI_27B.id;
   onProgress({
     status: "init",
-    message: useOfficialManifest ? "Loading model manifest" : "Parsing GGUF header",
+    message: useOfficialManifest
+      ? "Loading model manifest"
+      : "Parsing GGUF header",
   });
   const model = useOfficialManifest
     ? { manifestUrl: BONSAI_27B.manifestUrl, auxUrl: BONSAI_27B.auxUrl }
@@ -82,11 +84,13 @@ class BonsaiChat {
 
   async *streamTurn(messages, options = {}) {
     try {
-      for await (const event of streamChatEvents(
-        this.nativeChat,
-        messages,
-        { ...this.defaultGeneration, ...options },
-      )) {
+      for await (
+        const event of streamChatEvents(
+          this.nativeChat,
+          messages,
+          { ...this.defaultGeneration, ...options },
+        )
+      ) {
         if (event.type === "complete") {
           this.lastAssistantContent = event.result.text;
         }
@@ -141,8 +145,9 @@ export class Bonsai27B {
     );
 
     onProgress({ status: "init", message: "Requesting WebGPU device" });
-    const runtime =
-      source === BONSAI_27B.id ? BONSAI_27B.runtime : { kvCache: "q8" };
+    const runtime = source === BONSAI_27B.id
+      ? BONSAI_27B.runtime
+      : { kvCache: "q8" };
     const engine = await createEngine({
       ...model,
       dataUrl: ggufUrl,

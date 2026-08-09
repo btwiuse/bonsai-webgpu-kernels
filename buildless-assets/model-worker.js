@@ -26,10 +26,12 @@ self.onmessage = async ({ data }) => {
 
     if (data.type === "generate" && chat) {
       generationAbort = new AbortController();
-      for await (const event of chat.streamTurn(data.messages, {
-        ...data.options,
-        signal: generationAbort.signal,
-      })) {
+      for await (
+        const event of chat.streamTurn(data.messages, {
+          ...data.options,
+          signal: generationAbort.signal,
+        })
+      ) {
         postMessage({ type: "event", event });
       }
       postMessage({ type: "generation-complete" });

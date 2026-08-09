@@ -71,16 +71,18 @@ window.BonsaiLoader = {
 const shardOf = (f) =>
   Math.min(SHARDS, 1 + Math.floor(clamp01(f / 0.9) * SHARDS));
 function deriveStatus(f) {
-  if (f >= 1)
+  if (f >= 1) {
     return state.external ? "READY" : "READY — MODEL RESIDENT IN VRAM";
+  }
   if (state.external) {
     return "STREAMING WEIGHTS → VRAM";
   }
   if (f > 0.985) return "ALLOCATING KV CACHE · WARMUP";
   if (f > 0.95) return "COMPILING WEBGPU KERNELS";
   if (f > 0.9) return "VERIFYING SHARD CHECKSUMS";
-  if (f > 0.015)
+  if (f > 0.015) {
     return "STREAMING WEIGHTS — SHARD " + shardOf(f) + "/" + SHARDS;
+  }
   return "REQUESTING MANIFEST";
 }
 function simulate() {
@@ -95,13 +97,19 @@ function simulate() {
     const dt = Math.min(now - prev, 0.25);
     prev = now;
     if (t > 0.7 && now > stallUntil) {
-      if (Math.random() < 0.35 * dt)
+      if (Math.random() < 0.35 * dt) {
         stallUntil = now + 0.4 + Math.random() * 0.8;
+      }
       const frac = simBytes / TOTAL_BYTES;
-      const phaseMul =
-        frac > 0.985 ? 0.1 : frac > 0.95 ? 0.16 : frac > 0.9 ? 0.35 : 1;
-      const mbps =
-        (150 + 55 * Math.sin(t * 0.5) + (Math.random() - 0.5) * 60) * phaseMul;
+      const phaseMul = frac > 0.985
+        ? 0.1
+        : frac > 0.95
+        ? 0.16
+        : frac > 0.9
+        ? 0.35
+        : 1;
+      const mbps = (150 + 55 * Math.sin(t * 0.5) + (Math.random() - 0.5) * 60) *
+        phaseMul;
       simBytes = Math.min(TOTAL_BYTES, simBytes + mbps * 1e6 * SPEED * dt);
       BonsaiLoader.set(simBytes, TOTAL_BYTES);
       state.external = false;
@@ -134,8 +142,8 @@ function updateDom(now) {
   el.pct.textContent = pctInt;
   el.prog.setAttribute("aria-valuenow", pctInt);
   el.bar.style.width = (f * 100).toFixed(1) + "%";
-  el.status.textContent =
-    state.phaseOverride || deriveStatus(state.doneAt ? 1 : f);
+  el.status.textContent = state.phaseOverride ||
+    deriveStatus(state.doneAt ? 1 : f);
   if (state.doneAt) {
     el.statA.textContent = state.external
       ? GB(state.totalBytes) + " GB RESIDENT IN VRAM"
@@ -150,16 +158,17 @@ function updateDom(now) {
   } else {
     const total = state.totalBytes;
     const bytes = f * total;
-    const rate =
-      state.rate > 1e5 ? " · " + Math.round(state.rate / 1e6) + " MB/S" : "";
+    const rate = state.rate > 1e5
+      ? " · " + Math.round(state.rate / 1e6) + " MB/S"
+      : "";
     const eta = state.rate > 1e5 ? fmtEta((total - bytes) / state.rate) : "";
     const seg = state.external
       ? state.tensorsTotal
         ? " · TENSOR " + state.tensors + "/" + state.tensorsTotal
         : ""
       : " · SHARD " + (state.shard || shardOf(f)) + "/" + SHARDS;
-    el.statA.textContent =
-      GB(bytes) + " / " + GB(total) + " GB" + seg + rate + eta;
+    el.statA.textContent = GB(bytes) + " / " + GB(total) + " GB" + seg + rate +
+      eta;
   }
 }
 function stepProgress(dt, now) {
@@ -180,13 +189,12 @@ function stepProgress(dt, now) {
   }
   return state.shown;
 }
-const START_STAGE =
-  FREEZE !== null ||
-  QS.has("az") ||
-  QS.has("seed") ||
-  QS.get("stage") === "loading"
-    ? "loading"
-    : "landing";
+const START_STAGE = FREEZE !== null ||
+    QS.has("az") ||
+    QS.has("seed") ||
+    QS.get("stage") === "loading"
+  ? "loading"
+  : "landing";
 const App = {
   stage: START_STAGE,
   landingActive: START_STAGE === "landing",
@@ -199,10 +207,11 @@ const App = {
     document.body.classList.add("stage-loading");
     if (this.startGarden) this.startGarden();
     if (window.BonsaiApp) window.BonsaiApp.startLoad();
-    if (FREEZE === null && QS.has("demo"))
+    if (FREEZE === null && QS.has("demo")) {
       setTimeout(() => {
         if (!state.external) simulate();
       }, 900);
+    }
     setTimeout(() => {
       this.landingActive = false;
       if (this._disposeLanding) this._disposeLanding();
@@ -221,10 +230,11 @@ const App = {
       updateDom(now);
     })();
     if (window.BonsaiApp) window.BonsaiApp.startLoad();
-    if (FREEZE === null && QS.has("demo"))
+    if (FREEZE === null && QS.has("demo")) {
       setTimeout(() => {
         if (!state.external) simulate();
       }, 700);
+    }
   },
 };
 window.App = App;

@@ -3,22 +3,15 @@
 //
 // Composed into PrismScene.prototype by `scene-prism-class.js`.
 
+import { CV, EXIT_LEN } from "./scene-prism-constants.js";
 import {
-  CV,
-  EXIT_LEN,
-} from "./scene-prism-constants.js";
-import {
-  RAY,
-  SLOPE,
   clamp01,
   hermite as smoothEase,
+  RAY,
+  SLOPE,
   sstep,
 } from "./scene-prism-utils.js";
-import {
-  refract2,
-  reflect2,
-  cross2,
-} from "./scene-prism-trace.js";
+import { cross2, reflect2, refract2 } from "./scene-prism-trace.js";
 
 export const PrismTraceMethods = {
   // Update the triangle's 2D vertex positions for current rotation+bob.
@@ -89,8 +82,7 @@ export const PrismTraceMethods = {
   castEntry() {
     const sx = this.viewX.left - 2;
     const sy = RAY.py + (sx - RAY.px) * SLOPE;
-    const hit =
-      this.castRay(sx, sy, RAY.dx, RAY.dy, -1, this.ENTRY_HIT) &&
+    const hit = this.castRay(sx, sy, RAY.dx, RAY.dy, -1, this.ENTRY_HIT) &&
       this.ENTRY_HIT.nx * RAY.dx + this.ENTRY_HIT.ny * RAY.dy < -0.001;
     this.ENTRY.valid = hit;
     if (hit) {
@@ -110,8 +102,9 @@ export const PrismTraceMethods = {
     if (!this.ENTRY.valid) return;
     if (
       !refract2(RAY.dx, RAY.dy, this.ENTRY.nx, this.ENTRY.ny, 1 / n, this.TDIR)
-    )
+    ) {
       return;
+    }
     rec.pts[0].x = this.ENTRY.x;
     rec.pts[0].y = this.ENTRY.y;
     rec.count = 1;
@@ -241,12 +234,14 @@ export const PrismTraceMethods = {
         acc += this.SEG_LEN[seg];
         seg++;
       }
-      const u =
-        this.SEG_LEN[seg] > 1e-9 ? (target - acc) / this.SEG_LEN[seg] : 0;
+      const u = this.SEG_LEN[seg] > 1e-9
+        ? (target - acc) / this.SEG_LEN[seg]
+        : 0;
       const a = rec.pts[seg - 1];
       const b = rec.pts[seg];
       this.innerSheet.setPoint(
-        k, c,
+        k,
+        c,
         a.x + (b.x - a.x) * u,
         a.y + (b.y - a.y) * u,
         zOff,
@@ -271,7 +266,8 @@ export const PrismTraceMethods = {
       }
       const sway = Math.sin(tA * 0.8 + w * 5.4 + u * 2.4) * 0.14 * u;
       this.exitSheet.setPoint(
-        k, c,
+        k,
+        c,
         x - Math.sin(ang) * sway,
         y + Math.cos(ang) * sway,
         zOff,

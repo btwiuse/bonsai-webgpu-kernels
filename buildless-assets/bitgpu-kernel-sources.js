@@ -17,7 +17,9 @@ function shaderName(file) {
 async function fetchShaderCatalog() {
   const response = await fetch(PACKAGE_INDEX_URL);
   if (!response.ok) {
-    throw new Error(`Unable to read bitgpu source index (HTTP ${response.status}).`);
+    throw new Error(
+      `Unable to read bitgpu source index (HTTP ${response.status}).`,
+    );
   }
 
   const { files = [] } = await response.json();
@@ -28,7 +30,9 @@ async function fetchShaderCatalog() {
 
   return Promise.all(
     shaderFiles.map(async (file) => {
-      const response = await fetch(`${SHADER_BASE_URL}${file.slice("/shaders/".length)}`);
+      const response = await fetch(
+        `${SHADER_BASE_URL}${file.slice("/shaders/".length)}`,
+      );
       if (!response.ok) {
         throw new Error(`Unable to read ${file} (HTTP ${response.status}).`);
       }

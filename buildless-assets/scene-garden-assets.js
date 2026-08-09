@@ -44,10 +44,9 @@ export const barkTex = canvasTex(256, function (g, s) {
   g.fillRect(0, 0, s, s);
   for (let i = 0; i < 170; i++) {
     const x = Math.random() * s;
-    g.strokeStyle =
-      Math.random() < 0.5
-        ? "rgba(26,17,11," + (0.1 + Math.random() * 0.26) + ")"
-        : "rgba(99,77,58," + (0.08 + Math.random() * 0.2) + ")";
+    g.strokeStyle = Math.random() < 0.5
+      ? "rgba(26,17,11," + (0.1 + Math.random() * 0.26) + ")"
+      : "rgba(99,77,58," + (0.08 + Math.random() * 0.2) + ")";
     g.lineWidth = 1 + Math.random() * 2.2;
     g.beginPath();
     g.moveTo(x, 0);

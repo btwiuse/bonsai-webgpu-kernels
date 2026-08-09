@@ -3,44 +3,44 @@
 // Composed into PrismScene.prototype by `scene-prism-class.js`.
 
 import {
-  CV,
   COL_COUNT,
-  EXIT_LEN,
-  PULSE_COUNT,
-  PULSE_COL,
-  T_EMIT,
+  CV,
   CYCLE,
-  T0,
-  SPREAD,
+  EXIT_LEN,
   N_CENTER,
+  PULSE_COL,
+  PULSE_COUNT,
+  SPREAD,
+  T0,
+  T_EMIT,
 } from "./scene-prism-constants.js";
-import {
-  RAY,
-  SLOPE,
-  clamp01,
-  wrapPI,
-} from "./scene-prism-utils.js";
-import { sampleSheet, samplePts } from "./scene-prism-geometry.js";
+import { clamp01, RAY, SLOPE, wrapPI } from "./scene-prism-utils.js";
+import { samplePts, sampleSheet } from "./scene-prism-geometry.js";
 
 export const PrismUpdateMethods = {
   // Per-column update: opacity ease, exit/inner columns, sheet attrs.
   updateColumn(c, w, tA, airT, sinceEntry, ease, hasEntry, tP, aC) {
     const rec = this.TRACES[c];
-    this.colAlpha[c] +=
-      ((hasEntry && rec.valid ? 1 : 0) - this.colAlpha[c]) * ease;
+    this.colAlpha[c] += ((hasEntry && rec.valid ? 1 : 0) - this.colAlpha[c]) *
+      ease;
     const zOff = (w - 0.5) * 0.3;
     if (rec.valid) {
       const ai = Math.atan2(rec.dy, rec.dx);
       this.writeExitColumn(
-        c, w, rec.ex, rec.ey, aC + wrapPI(ai - aC) * SPREAD, tA, zOff,
+        c,
+        w,
+        rec.ex,
+        rec.ey,
+        aC + wrapPI(ai - aC) * SPREAD,
+        tA,
+        zOff,
       );
       this.writeInnerColumn(rec, c, zOff);
       this.T_OUT[c] = airT + (rec.len * this.N_COL[c]) / CV;
     }
-    const glassRev =
-      rec.len > 1e-6
-        ? clamp01((sinceEntry * (CV / this.N_COL[c])) / rec.len)
-        : 0;
+    const glassRev = rec.len > 1e-6
+      ? clamp01((sinceEntry * (CV / this.N_COL[c])) / rec.len)
+      : 0;
     this.innerSheet.setAlpha(c, this.colAlpha[c]);
     this.innerSheet.setRev(c, glassRev);
     this.exitSheet.setAlpha(c, this.colAlpha[c]);
@@ -53,7 +53,9 @@ export const PrismUpdateMethods = {
   // Re-trace every column, advance sheets, gather glow aggregates.
   traceColumns(tA, airT, sinceEntry, ease, hasEntry, tP, dt) {
     this.trace(N_CENTER, this.CTRACE);
-    for (let c = 0; c < COL_COUNT; c++) this.trace(this.N_COL[c], this.TRACES[c]);
+    for (let c = 0; c < COL_COUNT; c++) {
+      this.trace(this.N_COL[c], this.TRACES[c]);
+    }
     const aC = this.centerAngle();
     let glowX = 0;
     let glowY = 0;
@@ -62,7 +64,15 @@ export const PrismUpdateMethods = {
     let tFirstOut = Infinity;
     for (let c = 0; c < COL_COUNT; c++) {
       this.updateColumn(
-        c, c / (COL_COUNT - 1), tA, airT, sinceEntry, ease, hasEntry, tP, aC,
+        c,
+        c / (COL_COUNT - 1),
+        tA,
+        airT,
+        sinceEntry,
+        ease,
+        hasEntry,
+        tP,
+        aC,
       );
       const rec = this.TRACES[c];
       if (rec.valid) {
@@ -79,8 +89,8 @@ export const PrismUpdateMethods = {
     this.innerSheet.commit();
     const trapT = hasEntry ? (1 - alive / COL_COUNT) * 0.85 : 0;
     this.trapGlow += (trapT - this.trapGlow) * (1 - Math.exp(-3 * dt));
-    this.innerSheet.mat.uniforms.uOpacity.value =
-      0.3 * (1 + this.trapGlow * 1.6);
+    this.innerSheet.mat.uniforms.uOpacity.value = 0.3 *
+      (1 + this.trapGlow * 1.6);
     return { glowX, glowY, glowAlpha, tFirstOut };
   },
 
@@ -90,8 +100,7 @@ export const PrismUpdateMethods = {
       const c = PULSE_COL[i];
       sampleSheet(this.exitSheet, c, 0.38, this.SAMP);
       this.washes[i].position.set(this.SAMP.x, this.SAMP.y, -2);
-      this.washes[i].material.opacity =
-        0.05 *
+      this.washes[i].material.opacity = 0.05 *
         this.colAlpha[c] *
         clamp01((Math.max(0, tP - this.T_OUT[c]) * CV) / 5);
     }
@@ -105,17 +114,16 @@ export const PrismUpdateMethods = {
       );
     }
     this.exitGlow.scale.setScalar(0.5 * (1 + 0.12 * Math.sin(tA * 3)));
-    this.exitGlow.material.opacity =
-      0.9 * clamp01(glow.glowAlpha / (COL_COUNT * 0.5)) * exitFront;
+    this.exitGlow.material.opacity = 0.9 *
+      clamp01(glow.glowAlpha / (COL_COUNT * 0.5)) * exitFront;
     if (hasEntry) this.entryGlow.position.set(this.ENTRY.x, this.ENTRY.y, 0.05);
-    this.entryGlow.material.opacity =
-      0.7 * this.entryAlpha * clamp01((sinceEntry * CV) / 0.7);
+    this.entryGlow.material.opacity = 0.7 * this.entryAlpha *
+      clamp01((sinceEntry * CV) / 0.7);
     samplePts(this.INC_PTS, 0.03, this.SAMP);
     this.sourceDot.position.copy(this.SAMP);
     this.sourceDot.scale.setScalar(0.17 + 0.02 * Math.sin(tA * 2.1));
     this.sourceDot.material.opacity = 0.95 * lamp;
-    this.incoming.mat.uniforms.uOpacity.value =
-      0.95 *
+    this.incoming.mat.uniforms.uOpacity.value = 0.95 *
       lamp *
       (0.97 + 0.02 * Math.sin(tA * 9.1) + 0.015 * Math.sin(tA * 3.7));
     for (const b of this.allBeams) b.mat.uniforms.uTime.value = tA;
@@ -180,9 +188,9 @@ export const PrismUpdateMethods = {
     const x0 = this.viewX.left - 0.5;
     const dIn = hasEntry
       ? Math.hypot(
-          this.ENTRY.x - x0,
-          this.ENTRY.y - (RAY.py + (x0 - RAY.px) * SLOPE),
-        )
+        this.ENTRY.x - x0,
+        this.ENTRY.y - (RAY.py + (x0 - RAY.px) * SLOPE),
+      )
       : (this.viewX.right + 1 - x0) / RAY.dx;
     const airT = dIn / CV;
     const sinceEntry = Math.max(0, tP - airT);
@@ -211,9 +219,24 @@ export const PrismUpdateMethods = {
     const lamp = clamp01(tP / 0.3);
     const { dIn, airT, sinceEntry } = this.updateEntryBeams(tA, hasEntry, tP);
     const glow = this.traceColumns(
-      tA, airT, sinceEntry, ease, hasEntry, tP, dt,
+      tA,
+      airT,
+      sinceEntry,
+      ease,
+      hasEntry,
+      tP,
+      dt,
     );
-    this.updateGlowAndPulses(tA, tP, dIn, airT, sinceEntry, lamp, hasEntry, glow);
+    this.updateGlowAndPulses(
+      tA,
+      tP,
+      dIn,
+      airT,
+      sinceEntry,
+      lamp,
+      hasEntry,
+      glow,
+    );
     return lamp;
   },
 };

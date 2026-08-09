@@ -5,21 +5,21 @@
 // over time. Uses a seeded RNG so the same seed always produces the same tree.
 
 import {
-  TAU,
-  UP,
-  mulberry32,
+  clamp,
   easeOutBack,
   easeOutCubic,
-  clamp,
   lerp,
+  mulberry32,
+  TAU,
+  UP,
 } from "./scene-garden-utils.js";
 import {
   barkMat,
+  blossomMat,
+  glowTex,
+  MOSS_GEO,
   mossMatA,
   mossMatB,
-  MOSS_GEO,
-  glowTex,
-  blossomMat,
   padPalette,
   WHITE,
 } from "./scene-garden-assets.js";
@@ -87,9 +87,8 @@ export class TreeBuilder {
   steerForSegment(depth, f, phase, bendMag, leanVec, outward) {
     const steer = new THREE.Vector3();
     if (depth === 0) {
-      const sway =
-        (Math.sin(f * Math.PI * 1.9 + phase) * 0.8 +
-          Math.sin(f * Math.PI * 0.9) * 0.5) *
+      const sway = (Math.sin(f * Math.PI * 1.9 + phase) * 0.8 +
+        Math.sin(f * Math.PI * 0.9) * 0.5) *
         bendMag;
       steer.addScaledVector(leanVec, sway * 0.75);
       steer.y = 0.85;
@@ -157,8 +156,9 @@ export class TreeBuilder {
     const radiusAt = (f) => rad + (endRad - rad) * Math.pow(f, 0.85);
     for (let j = 1; j < n; j++) {
       const jointRadius = radiusAt(j / n);
-      if (jointRadius >= 0.026)
+      if (jointRadius >= 0.026) {
         this.addJoint(pts[j], jointRadius, t0 + dur * (j / n));
+      }
     }
     for (let k = 0; k < n; k++) {
       this.addSeg(

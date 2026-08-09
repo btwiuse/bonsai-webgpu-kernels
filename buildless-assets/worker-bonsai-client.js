@@ -36,7 +36,10 @@ class WorkerChatClient {
     this.generationError = null;
     this.generationDone = false;
     worker.addEventListener("message", ({ data }) => this.receive(data));
-    worker.addEventListener("error", (event) => this.fail(event.error ?? event.message));
+    worker.addEventListener(
+      "error",
+      (event) => this.fail(event.error ?? event.message),
+    );
   }
 
   load(source, options) {
@@ -110,7 +113,11 @@ class WorkerChatClient {
     const { signal, ...workerOptions } = options;
     const abort = () => this.worker.postMessage({ type: "abort" });
     signal?.addEventListener("abort", abort, { once: true });
-    this.worker.postMessage({ type: "generate", messages, options: workerOptions });
+    this.worker.postMessage({
+      type: "generate",
+      messages,
+      options: workerOptions,
+    });
     try {
       while (!this.generationDone || this.events.length > 0) {
         if (this.events.length > 0) {

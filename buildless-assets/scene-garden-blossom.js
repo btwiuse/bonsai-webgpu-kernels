@@ -2,9 +2,9 @@
 
 import {
   blossomMat,
+  MOSS_GEO,
   padPalette,
   WHITE,
-  MOSS_GEO,
 } from "./scene-garden-assets.js";
 
 let blossomTpl = null;
