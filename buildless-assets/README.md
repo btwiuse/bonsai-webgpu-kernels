@@ -50,6 +50,25 @@ sampling settings: `temperature: 0.5`, `topP: 0.85`, and `topK: 20`. Custom
 `?src=` GGUF URLs retain bitgpu's own defaults unless their caller supplies
 turn options.
 
+Thinking is opt-in per turn (the composer bulb). Two query parameters add
+optional bounds without changing default behavior:
+
+- `?thinkBudget=N` forces bitgpu to close `</think>` after N reasoning tokens.
+- `?thinkEarlyStop` enables bitgpu's logit-confidence early stop for thinking
+  (`?thinkEarlyStop=off` explicitly disables it).
+
+Both are candidate-filter features in bitgpu@0.19.1 and work on the pinned
+Qwen3.5 hybrid backbone. They are deliberately not part of the default page:
+the original page never bounded reasoning, so default turns stay equivalent.
+
+Evaluated and not integrated: `chat.save/restore` snapshots are full KV-cache
+serializations (heavy for a 4096-token q8 cache on a 27B hybrid), and delta
+snapshots (`prewarm` + `save({ delta: true })`) are explicitly rejected by the
+engine for the qwen3_5 hybrid backbone; `prewarm` alone only serves that
+checkpointing pattern; `countTokens` has no original-page UI equivalent that
+would not change existing behavior. `promptLookup` is left disabled because the
+hybrid backbone rejects it and the page never forwards it.
+
 Add `?runtime=worker` to host bitgpu in a module Worker, following bitgpu's
 worker example. This is opt-in because Worker WebGPU availability differs by
 browser; the default keeps the broadly compatible main-thread runtime.

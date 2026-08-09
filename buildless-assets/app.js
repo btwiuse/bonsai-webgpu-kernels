@@ -5,8 +5,23 @@ import { renderAnswer } from "./markdown-renderer.js";
 import { setupKernelInspector } from "./kernel-inspector.js";
 
 const $ = (id2) => document.getElementById(id2);
-const useWorkerRuntime = new URLSearchParams(location.search).get("runtime") === "worker";
+const queryParams = new URLSearchParams(location.search);
+const useWorkerRuntime = queryParams.get("runtime") === "worker";
 const modelRuntime = useWorkerRuntime ? WorkerBonsai27B : Bonsai27B;
+// Opt-in reasoning controls for bitgpu's think mode. Defaults stay untouched,
+// so the page behaves identically without these query parameters.
+const thinkBudgetRaw = queryParams.get("thinkBudget");
+const parsedThinkBudget = Number.parseInt(thinkBudgetRaw ?? "", 10);
+const thinkBudget =
+  thinkBudgetRaw !== null &&
+  thinkBudgetRaw.trim() !== "" &&
+  Number.isFinite(parsedThinkBudget) &&
+  parsedThinkBudget >= 0
+    ? parsedThinkBudget
+    : undefined;
+const thinkEarlyStop = queryParams.has("thinkEarlyStop")
+  ? queryParams.get("thinkEarlyStop") !== "off"
+  : undefined;
 let chat = null;
 let messages = [];
 let isGenerating = false;
@@ -232,6 +247,8 @@ async function send() {
     for await (const event of chat.streamTurn(messages, {
       signal: abortController.signal,
       think: thinkTurn,
+      thinkBudget,
+      thinkEarlyStop,
     })) {
       const now = performance.now();
       if (event.type === "complete") {
