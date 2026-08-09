@@ -30,6 +30,10 @@ The GPU implementation is loaded as pinned browser ESM from jsDelivr:
 - `bitgpu@0.19.1/dist/gguf.js`: GGUF parser and Bonsai-27B model manifest adapter
 - `bitgpu@0.19.1/dist/chat.js`: tokenizer, Jinja chat template, and streaming chat layer
 
+The answer renderer also loads pinned browser ESM from esm.sh: `marked@17`,
+`katex@0.16`, and `dompurify@3.2.6`. DOMPurify sanitizes generated Markdown
+before it is inserted into the page.
+
 The Kernels panel reads the static WGSL source catalogue from the same pinned
 `bitgpu` distribution after the model loads. Public `bitgpu` does not expose
 browser-specific compiled-pipeline variants.

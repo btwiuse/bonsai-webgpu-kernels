@@ -1,21 +1,26 @@
 let marked = null;
 let katexLib = null;
+let sanitizeHtml = null;
 const katexCache = new Map();
 let katexFragments = null;
-import("https://esm.sh/marked@17")
-  .then((m) => {
-    marked = m.marked;
+Promise.all([
+  import("https://esm.sh/marked@17"),
+  import("https://esm.sh/katex@0.16"),
+  import("https://esm.sh/dompurify@3.2.6"),
+])
+  .then(([markedModule, katexModule, domPurifyModule]) => {
+    marked = markedModule.marked;
     marked.use({ gfm: true, breaks: true });
-    return import("https://esm.sh/katex@0.16")
-      .then((k) => {
-        katexLib = k.default ?? k;
-        marked.use(makeKatexExtension());
-        ensureKatexCss();
-      })
-      .catch(() => {});
+    katexLib = katexModule.default ?? katexModule;
+    const domPurify = domPurifyModule.default ?? domPurifyModule;
+    sanitizeHtml = (html) => domPurify.sanitize(html, { USE_PROFILES: { html: true } });
+    marked.use(makeKatexExtension());
+    ensureKatexCss();
   })
   .catch(() => {
     marked = null;
+    katexLib = null;
+    sanitizeHtml = null;
   });
 function ensureKatexCss() {
   if (document.querySelector("link[data-katex]")) return;
@@ -103,7 +108,7 @@ function renderKatex(text, display) {
 function stashKatex(text, display) {
   const html = renderKatex(text, display);
   if (!katexFragments) return html;
-  return `<\!--katex:${katexFragments.push(html) - 1}-->`;
+  return `<span data-katex-fragment="${katexFragments.push(html) - 1}"></span>`;
 }
 function trimIncompleteMath(text) {
   let cut = -1;
@@ -131,13 +136,13 @@ function trimIncompleteMath(text) {
 export function renderAnswer(el2, raw, withCaret) {
   const text =
     withCaret && katexLib ? trimIncompleteMath(raw || "") : raw || "";
-  if (marked) {
+  if (marked && sanitizeHtml) {
     try {
       katexFragments = [];
       let html = sanitizeHtml(marked.parse(text));
       if (katexFragments.length) {
         html = html.replace(
-          /<\!--katex:(\d+)-->/g,
+          /<span data-katex-fragment="(\d+)"><\/span>/g,
           (_, i) => katexFragments[+i] ?? "",
         );
       }
@@ -177,26 +182,6 @@ function appendCaret(el2) {
     host = tail;
   }
   host.appendChild(caret);
-}
-function sanitizeHtml(html) {
-  const tpl = document.createElement("template");
-  tpl.innerHTML = html;
-  tpl.content
-    .querySelectorAll("script,style,iframe,object,embed,link,meta,form")
-    .forEach((el2) => el2.remove());
-  tpl.content.querySelectorAll("*").forEach((el2) => {
-    for (const attr of [...el2.attributes]) {
-      const name = attr.name.toLowerCase();
-      if (
-        name.startsWith("on") ||
-        ((name === "href" || name === "src") &&
-          /^\s*(javascript|data):/i.test(attr.value))
-      ) {
-        el2.removeAttribute(attr.name);
-      }
-    }
-  });
-  return tpl.innerHTML;
 }
 function formatInline(text) {
   return text
