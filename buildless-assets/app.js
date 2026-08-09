@@ -1,313 +1,10 @@
 import { Bonsai27B, DEFAULT_GGUF_FILE } from "./bonsai-adapter.js";
+import { setupModelAccess } from "./model-access.js";
 import { renderAnswer } from "./markdown-renderer.js";
 import { setupKernelInspector } from "./kernel-inspector.js";
 
 const $ = (id2) => document.getElementById(id2);
-const QSA = new URLSearchParams(location.search);
-const REQUIRE_HF_TOKEN = window.BONSAI_REQUIRE_HF_TOKEN === true;
-const MODEL_ID = "prism-ml/Bonsai-27B-gguf";
-const MODEL_SRC = QSA.get("src") || MODEL_ID;
-const TOKEN_KEY = "bonsai27b_hf_token_v1";
-const TOTAL_BYTES_FALLBACK = 38e8;
 let chat = null;
-let loadState = "idle";
-let loadBlocked = false;
-let accessToken = null;
-let messages = [];
-let isGenerating = false;
-let contextExhausted = false;
-let abortController = null;
-let reauthAfterGate = false;
-const SEED_EXAMPLES = [
-  {
-    label: "LOGIC PUZZLE",
-    prompt:
-      "You have three boxes labeled Apples, Oranges, and Mixed. Every label is wrong.\n\nYou may take one fruit from one box without looking inside. How can you correctly relabel all three boxes?",
-  },
-  {
-    label: "GENERATE CODE",
-    prompt:
-      "Write a python function that takes a list of numbers and returns the sum of the even numbers.",
-  },
-  { label: "WRITE A HAIKU", prompt: "Write a haiku about a bonsai tree." },
-];
-const gate = $("gate"),
-  gateInput = $("gateInput"),
-  gateError = $("gateError");
-const gateContinue = $("gateContinue"),
-  gateField = $("gateField"),
-  veil = $("veil");
-async function validateToken(token) {
-  const trimmed = (token || "").trim();
-  if (!trimmed) return { valid: false, error: "A token is required." };
-  try {
-    const res = await fetch(`https://huggingface.co/api/models/${MODEL_ID}`, {
-      headers: { Authorization: `Bearer ${trimmed}` },
-    });
-    if (res.ok) return { valid: true };
-    if (res.status === 401) return { valid: false, error: "Invalid token." };
-    let body = null;
-    try {
-      body = await res.json();
-    } catch {}
-    const errText = body?.error ? String(body.error) : "";
-    if (
-      res.status === 404 ||
-      errText.toLowerCase().includes("repository not found")
-    ) {
-      return {
-        valid: false,
-        error:
-          "This token can't access the model. Request access on the model page, then try again.",
-      };
-    }
-    if (res.status === 403)
-      return {
-        valid: false,
-        error: "Access forbidden — the token needs read permission.",
-      };
-    return {
-      valid: false,
-      error: errText || `Validation failed (HTTP ${res.status}).`,
-    };
-  } catch {
-    return {
-      valid: null,
-      error: "Couldn't reach huggingface.co to verify the token.",
-    };
-  }
-}
-function showGate(prefill = "") {
-  veil.hidden = true;
-  gate.hidden = false;
-  gate.classList.remove("leave");
-  if (prefill) gateInput.value = prefill;
-  requestAnimationFrame(() =>
-    requestAnimationFrame(() => {
-      gate.classList.add("show");
-      gateInput.focus();
-    }),
-  );
-}
-function showGateError(message) {
-  gateError.textContent = message;
-  gateError.hidden = false;
-  gateField.classList.add("error");
-}
-function clearGateError() {
-  gateError.hidden = true;
-  gateField.classList.remove("error");
-}
-function grant(token) {
-  accessToken = token;
-  try {
-    localStorage.setItem(TOKEN_KEY, token);
-  } catch {}
-  gate.classList.add("leave");
-  setTimeout(() => {
-    gate.hidden = true;
-    gate.classList.remove("show", "leave");
-  }, 550);
-  if (veil.hidden === false) {
-    veil.classList.add("leave");
-    setTimeout(() => {
-      veil.hidden = true;
-      veil.classList.remove("leave");
-    }, 850);
-  }
-  window.App?.bootLanding?.();
-  runAvailabilityCheck();
-  if (reauthAfterGate) {
-    reauthAfterGate = false;
-    hideLoadError();
-    startLoad();
-  }
-}
-async function submitGate() {
-  if (gateContinue.classList.contains("busy")) return;
-  const token = gateInput.value.trim();
-  if (!token) {
-    showGateError("A token is required.");
-    return;
-  }
-  clearGateError();
-  gateContinue.classList.add("busy");
-  gateContinue.textContent = "VALIDATING …";
-  const result = await validateToken(token);
-  gateContinue.classList.remove("busy");
-  gateContinue.innerHTML = "CONTINUE &rarr;";
-  if (result.valid === false) {
-    showGateError(result.error);
-    return;
-  }
-  grant(token);
-}
-gateContinue.addEventListener("click", (e2) => {
-  e2.preventDefault();
-  submitGate();
-});
-gateInput.addEventListener("keydown", (e2) => {
-  if (e2.key === "Enter") {
-    e2.preventDefault();
-    submitGate();
-  }
-});
-gateInput.addEventListener("input", clearGateError);
-$("gateShow").addEventListener("click", () => {
-  const hidden = gateInput.type === "password";
-  gateInput.type = hidden ? "text" : "password";
-  $("gateShow").textContent = hidden ? "HIDE" : "SHOW";
-});
-async function initAccess() {
-  if (!REQUIRE_HF_TOKEN) {
-    runAvailabilityCheck();
-    return;
-  }
-  let stored = null;
-  try {
-    stored = localStorage.getItem(TOKEN_KEY);
-  } catch {}
-  if (!stored) {
-    showGate();
-    return;
-  }
-  veil.hidden = false;
-  const result = await validateToken(stored);
-  if (result.valid === false) {
-    try {
-      localStorage.removeItem(TOKEN_KEY);
-    } catch {}
-    showGate(stored);
-    showGateError(result.error + " Enter a current token to continue.");
-    return;
-  }
-  grant(stored);
-}
-async function runAvailabilityCheck() {
-  if (!navigator.gpu) {
-    blockLoad(
-      "WebGPU isn't available in this browser. Try a recent Chrome or Edge.",
-    );
-    return;
-  }
-  try {
-    const res = await Bonsai27B.checkAvailability(MODEL_SRC, {
-      file: MODEL_SRC === MODEL_ID ? DEFAULT_GGUF_FILE : void 0,
-      accessToken: accessToken ?? void 0,
-    });
-    if (res && !res.ok && res.reason && loadState === "idle")
-      blockLoad(res.reason);
-  } catch {}
-}
-function blockLoad(reason) {
-  loadBlocked = true;
-  const cta = $("loadCta");
-  cta.textContent = "UNAVAILABLE ON THIS DEVICE";
-  cta.style.opacity = "0.45";
-  cta.style.pointerEvents = "none";
-  $("ctaNote").textContent = reason;
-  $("ctaNote").hidden = false;
-}
-$("loadCta").addEventListener(
-  "click",
-  (e2) => {
-    if (loadBlocked) {
-      e2.preventDefault();
-      e2.stopImmediatePropagation();
-    }
-  },
-  true,
-);
-window.BonsaiApp = { startLoad, enterChat };
-async function startLoad() {
-  if (loadState === "loading" || loadState === "ready" || loadBlocked) return;
-  loadState = "loading";
-  hideLoadError();
-  BonsaiLoader.set(0, TOTAL_BYTES_FALLBACK);
-  BonsaiLoader.phase("REQUESTING WEBGPU DEVICE");
-  if (document.body.classList.contains("stage-loading")) {
-    await new Promise((resolve) => setTimeout(resolve, 1150));
-  }
-  try {
-    chat = await Bonsai27B.load(MODEL_SRC, {
-      file: MODEL_SRC === MODEL_ID ? DEFAULT_GGUF_FILE : void 0,
-      accessToken: accessToken ?? void 0,
-      cache: QSA.has("nocache") ? false : void 0,
-      maxLength: Number.parseInt(QSA.get("ctx") ?? "", 10) || void 0,
-      onProgress: onLoadProgress,
-    });
-    loadState = "ready";
-    window.__bonsaiChat = chat;
-    prepChatUi();
-    BonsaiLoader.done();
-  } catch (error) {
-    console.error(error);
-    loadState = "failed";
-    showLoadError(error);
-  }
-}
-function onLoadProgress(event) {
-  if (event.status === "init") {
-    BonsaiLoader.phase((event.message || "INITIALIZING").toUpperCase());
-  } else if (event.status === "tokenizer") {
-    BonsaiLoader.phase("PARSING TOKENIZER — 248K VOCAB");
-  } else if (event.status === "weights") {
-    if (event.kind === "bytes" && Number.isFinite(event.loaded)) {
-      BonsaiLoader.phase(null);
-      BonsaiLoader.set(
-        event.loaded,
-        Number.isFinite(event.total) && event.total > 0
-          ? event.total
-          : TOTAL_BYTES_FALLBACK,
-      );
-    } else if (event.kind === "tensors") {
-      if (/warmup/i.test(event.message || "")) {
-        BonsaiLoader.phase("COMPILING WEBGPU KERNELS · WARMUP");
-      } else if (Number.isFinite(event.total) && event.total > 0) {
-        BonsaiLoader.info({ tensors: event.loaded, tensorsTotal: event.total });
-      }
-    }
-  }
-}
-function showLoadError(error) {
-  const message = String(error?.message ?? error);
-  document.body.classList.add("load-failed");
-  BonsaiLoader.phase("LOAD FAILED");
-  $("loadErrorMsg").textContent = message;
-  $("loadError").hidden = false;
-  const authish =
-    REQUIRE_HF_TOKEN &&
-    /\b40[134]\b|unauthorized|forbidden|invalid token|\btoken\b|repository not found|access (denied|restricted|to model)/i.test(
-      message,
-    );
-  $("changeTokenBtn").hidden = !authish;
-}
-function hideLoadError() {
-  document.body.classList.remove("load-failed");
-  $("loadError").hidden = true;
-  BonsaiLoader.phase(null);
-}
-$("retryBtn").addEventListener("click", (e2) => {
-  e2.preventDefault();
-  if (loadState === "failed") {
-    hideLoadError();
-    startLoad();
-  }
-});
-$("changeTokenBtn").addEventListener("click", (e2) => {
-  e2.preventDefault();
-  try {
-    localStorage.removeItem(TOKEN_KEY);
-  } catch {}
-  reauthAfterGate = true;
-  showGate(accessToken ?? "");
-});
-if (
-  document.body.classList.contains("stage-loading") &&
-  !QSA.has("demo") &&
-  !QSA.has("p")
-)
-  startLoad();
 const chatx = $("chatx"),
   cScroll = $("cScroll"),
   cThread = $("cThread");
@@ -317,9 +14,19 @@ const cInput = $("cInput"),
 const cStatus = $("cStatus"),
   cStatusText = $("cStatusText"),
   cLive = $("cLive");
+const modelAccess = setupModelAccess({
+  Bonsai27B,
+  defaultGgufFile: DEFAULT_GGUF_FILE,
+  byId: $,
+  getChat: () => chat,
+  setChat: (nextChat) => {
+    chat = nextChat;
+  },
+  onChatReady: prepChatUi,
+});
 BonsaiLoader.onReady(() => setTimeout(enterChat, 1800));
 function enterChat() {
-  if (loadState !== "ready" || document.body.classList.contains("stage-chat"))
+  if (!modelAccess.isReady() || document.body.classList.contains("stage-chat"))
     return;
   document.body.classList.add("stage-chat");
   chatx.classList.add("show");
@@ -646,5 +353,3 @@ function cancelStream() {
 }
 
 setupKernelInspector({ getChat: () => chat, byId: $ });
-
-initAccess();

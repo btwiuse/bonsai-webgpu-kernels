@@ -5,8 +5,13 @@ installation is required.
 
 | File | Responsibility |
 | --- | --- |
-| `landing.js` | Landing prism animation and model loading progress UI |
-| `app.js` | Access gate, chat UI, Markdown/KaTeX rendering, and kernel dialog |
+| `loader.js` | Landing-stage state and model loading progress UI |
+| `background-scene.js` | Ambient Three.js backdrop |
+| `prism-scene.js` | Landing prism and garden Three.js scenes |
+| `model-access.js` | Access gate, WebGPU availability checks, and model load lifecycle |
+| `app.js` | Chat session state and UI orchestration |
+| `markdown-renderer.js` | Incremental Markdown and KaTeX answer rendering |
+| `kernel-inspector.js` | Kernel-source dialog and search UI |
 | `bonsai-adapter.js` | Model URL resolution, Hugging Face access-token requests, loading progress, and the UI-facing streaming chat contract |
 | `landing.css`, `app.css` | Landing and chat styles |
 | `config.js` | Runtime access-gate configuration |
