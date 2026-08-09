@@ -4,7 +4,7 @@ import { setupModelAccess } from "./model-access.js";
 import { renderAnswer } from "./markdown-renderer.js";
 import { setupKernelInspector } from "./kernel-inspector.js";
 
-const $ = (id2) => document.getElementById(id2);
+const $ = (id) => document.getElementById(id);
 const queryParams = new URLSearchParams(location.search);
 const useWorkerRuntime = queryParams.get("runtime") === "worker";
 const modelRuntime = useWorkerRuntime ? WorkerBonsai27B : Bonsai27B;
@@ -93,8 +93,8 @@ function renderSeeds() {
     }),
   );
 }
-document.addEventListener("click", (e2) => {
-  const seed = e2.target.closest(".c-seed");
+document.addEventListener("click", (e) => {
+  const seed = e.target.closest(".c-seed");
   if (!seed || seed.disabled || !chat || isGenerating) return;
   cInput.value = seed.dataset.prompt || "";
   send();
@@ -106,9 +106,9 @@ cInput.addEventListener("input", () => {
   autoGrow();
   refreshSend();
 });
-cInput.addEventListener("keydown", (e2) => {
-  if (e2.key === "Enter" && !e2.shiftKey) {
-    e2.preventDefault();
+cInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
     if (!cSend.disabled) send();
   }
 });
@@ -125,19 +125,19 @@ function scrollDown(force = false) {
     cScroll.scrollHeight - cScroll.scrollTop - cScroll.clientHeight < 90;
   if (force || nearBottom) cScroll.scrollTop = cScroll.scrollHeight;
 }
-function setGenerating(on2) {
-  isGenerating = on2;
-  cInput.disabled = on2;
-  $("clearBtn").disabled = on2;
-  $("thinkToggle").disabled = on2;
-  cSend.style.display = on2 ? "none" : "";
-  cStop.style.display = on2 ? "grid" : "none";
+function setGenerating(on) {
+  isGenerating = on;
+  cInput.disabled = on;
+  $("clearBtn").disabled = on;
+  $("thinkToggle").disabled = on;
+  cSend.style.display = on ? "none" : "";
+  cStop.style.display = on ? "grid" : "none";
   document.querySelectorAll(".c-seed").forEach((s) => {
-    s.disabled = on2;
+    s.disabled = on;
   });
   setStatus(
-    on2 ? "busy" : "",
-    on2 ? (thinkingEnabled ? "REASONING …" : "WRITING …") : "READY",
+    on ? "busy" : "",
+    on ? (thinkingEnabled ? "REASONING …" : "WRITING …") : "READY",
   );
   refreshSend();
 }

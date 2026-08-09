@@ -30,11 +30,11 @@ if (window.THREE)
       grd.addColorStop(1, "rgba(255,255,255,0)");
       g.fillStyle = grd;
       g.fillRect(0, 0, 128, 128);
-      const t2 = new THREE.CanvasTexture(c);
-      t2.minFilter = THREE.LinearFilter;
-      return t2;
+      const texture = new THREE.CanvasTexture(c);
+      texture.minFilter = THREE.LinearFilter;
+      return texture;
     }
-    function makeWordTexture(word2) {
+    function makeWordTexture(word) {
       const W = 2048,
         H = 400;
       const c = document.createElement("canvas");
@@ -43,13 +43,13 @@ if (window.THREE)
       const g = c.getContext("2d");
       g.fillStyle = "#ffffff";
       g.textBaseline = "middle";
-      const font = (px2) =>
-        `700 ${px2}px 'Inter','SF Pro Display',-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif`;
-      const measure = (px2, sp2) => {
-        g.font = font(px2);
-        let t3 = -sp2;
-        for (const ch of word2) t3 += g.measureText(ch).width + sp2;
-        return t3;
+      const font = (px) =>
+        `700 ${px}px 'Inter','SF Pro Display',-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif`;
+      const measure = (px, sp) => {
+        g.font = font(px);
+        let total = -sp;
+        for (const ch of word) total += g.measureText(ch).width + sp;
+        return total;
       };
       let px = 250,
         sp = 70;
@@ -58,13 +58,13 @@ if (window.THREE)
       px *= fit;
       sp *= fit;
       let x = (W - measure(px, sp)) / 2;
-      for (const ch of word2) {
+      for (const ch of word) {
         g.fillText(ch, x, H / 2 + 10 * fit);
         x += g.measureText(ch).width + sp;
       }
-      const t2 = new THREE.CanvasTexture(c);
-      t2.minFilter = THREE.LinearFilter;
-      return { texture: t2, aspect: H / W };
+      const texture = new THREE.CanvasTexture(c);
+      texture.minFilter = THREE.LinearFilter;
+      return { texture, aspect: H / W };
     }
     const glowTex = makeGlowTexture();
     const word = makeWordTexture("BONSAI 27B");

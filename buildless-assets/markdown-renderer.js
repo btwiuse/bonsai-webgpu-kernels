@@ -121,8 +121,8 @@ function trimIncompleteMath(text) {
       if (cut === -1 || lastOpen < cut) cut = lastOpen;
     }
   }
-  const dd2 = text.split("$$").length - 1;
-  if (dd2 % 2 === 1) {
+  const dollarCount = text.split("$$").length - 1;
+  if (dollarCount % 2 === 1) {
     const lastOpen = text.lastIndexOf("$$");
     if (cut === -1 || lastOpen < cut) cut = lastOpen;
   }
@@ -133,7 +133,7 @@ function trimIncompleteMath(text) {
   }
   return cut === -1 ? text : text.slice(0, cut);
 }
-export function renderAnswer(el2, raw, withCaret) {
+export function renderAnswer(el, raw, withCaret) {
   const text =
     withCaret && katexLib ? trimIncompleteMath(raw || "") : raw || "";
   if (marked && sanitizeHtml) {
@@ -146,8 +146,8 @@ export function renderAnswer(el2, raw, withCaret) {
           (_, i) => katexFragments[+i] ?? "",
         );
       }
-      el2.innerHTML = html;
-      if (withCaret) appendCaret(el2);
+      el.innerHTML = html;
+      if (withCaret) appendCaret(el);
       return;
     } catch {
     } finally {
@@ -159,16 +159,16 @@ export function renderAnswer(el2, raw, withCaret) {
     .split(/\n{2,}/)
     .map((p) => p.trim())
     .filter(Boolean);
-  el2.innerHTML = paragraphs
+  el.innerHTML = paragraphs
     .map((p) => `<p>${formatInline(p).replace(/\n/g, "<br>")}</p>`)
     .join("");
-  if (withCaret) appendCaret(el2);
+  if (withCaret) appendCaret(el);
 }
-function appendCaret(el2) {
+function appendCaret(el) {
   const caret = document.createElement("span");
   caret.className = "a-caret";
   const DESCEND = /^(P|UL|OL|LI|BLOCKQUOTE|H[1-6]|PRE|CODE|EM|STRONG)$/;
-  let host = el2;
+  let host = el;
   for (;;) {
     let tail = host.lastChild;
     while (tail && tail.nodeType === Node.TEXT_NODE && !tail.textContent.trim())

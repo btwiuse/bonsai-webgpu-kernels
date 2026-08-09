@@ -9,9 +9,9 @@ if (!window.THREE) {
         ? 0.35
         : 1;
       const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
-      const clamp012 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+      const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
       const hermite = (x) => x * x * (3 - 2 * x);
-      const sstep = (a, b, x) => hermite(clamp012((x - a) / (b - a)));
+      const sstep = (a, b, x) => hermite(clamp01((x - a) / (b - a)));
       const wrapPI = (a) => {
         while (a > Math.PI) a -= Math.PI * 2;
         while (a < -Math.PI) a += Math.PI * 2;
@@ -69,10 +69,10 @@ if (!window.THREE) {
           return [r * f, g * f, b * f];
         }
         const specColor = (w) => waveColor(lambdaOf(w));
-        const NC = 24;
-        const NK = 40;
-        const NKI = 8;
-        const N_COL = Array.from({ length: NC }, (_, c) => nOf(c / (NC - 1)));
+        const COL_COUNT = 24;
+        const EXIT_ROWS = 40;
+        const INNER_ROWS = 8;
+        const N_COL = Array.from({ length: COL_COUNT }, (_, c) => nOf(c / (COL_COUNT - 1)));
         const PULSE_W = [0, 0.2, 0.4, 0.6, 0.8, 1];
         const TILT = 0.12;
         const RAY = { px: 0, py: 0.12, dx: Math.cos(TILT), dy: Math.sin(TILT) };
@@ -112,7 +112,7 @@ if (!window.THREE) {
           t.minFilter = THREE.LinearFilter;
           return t;
         }
-        function makeWordTexture(word2) {
+        function makeWordTexture(word) {
           const W = 2048,
             H = 400;
           const c = document.createElement("canvas");
@@ -121,13 +121,13 @@ if (!window.THREE) {
           const g = c.getContext("2d");
           g.fillStyle = "#ffffff";
           g.textBaseline = "middle";
-          const font = (px2) =>
-            `700 ${px2}px 'Inter','SF Pro Display',-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif`;
-          const measure = (px2, sp2) => {
-            g.font = font(px2);
-            let t2 = -sp2;
-            for (const ch of word2) t2 += g.measureText(ch).width + sp2;
-            return t2;
+          const font = (px) =>
+            `700 ${px}px 'Inter','SF Pro Display',-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif`;
+          const measure = (px, sp) => {
+            g.font = font(px);
+            let total = -sp;
+            for (const ch of word) total += g.measureText(ch).width + sp;
+            return total;
           };
           let px = 250,
             sp = 70;
@@ -136,7 +136,7 @@ if (!window.THREE) {
           px *= fit;
           sp *= fit;
           let x = (W - measure(px, sp)) / 2;
-          for (const ch of word2) {
+          for (const ch of word) {
             g.fillText(ch, x, H / 2 + 10 * fit);
             x += g.measureText(ch).width + sp;
           }
@@ -442,7 +442,7 @@ if (!window.THREE) {
           const pos = new Float32Array(count * 3);
           const aW = new Float32Array(count);
           const aT = new Float32Array(count);
-          const aA = new Float32Array(count);
+          const aAlpha = new Float32Array(count);
           const aRev = new Float32Array(count);
           const aCol = new Float32Array(count * 3);
           for (let k = 0; k < rows; k++) {
@@ -474,7 +474,7 @@ if (!window.THREE) {
           const posAttr = new THREE.BufferAttribute(pos, 3).setUsage(
             THREE.DynamicDrawUsage,
           );
-          const aAttr = new THREE.BufferAttribute(aA, 1).setUsage(
+          const aAttr = new THREE.BufferAttribute(aAlpha, 1).setUsage(
             THREE.DynamicDrawUsage,
           );
           const revAttr = new THREE.BufferAttribute(aRev, 1).setUsage(
@@ -522,7 +522,7 @@ if (!window.THREE) {
             rows,
             pos,
             setPoint,
-            setAlpha: (c, v) => setColumnScalar(aA, c, v),
+            setAlpha: (c, v) => setColumnScalar(aAlpha, c, v),
             setRev: (c, v) => setColumnScalar(aRev, c, v),
             commit() {
               posAttr.needsUpdate =
@@ -533,7 +533,7 @@ if (!window.THREE) {
           };
         }
         function sampleSheet(sheet, c, u, out) {
-          const f = clamp012(u) * (sheet.rows - 1);
+          const f = clamp01(u) * (sheet.rows - 1);
           const k = Math.min(sheet.rows - 2, Math.floor(f));
           const m = f - k;
           const i0 = (k * sheet.cols + c) * 3,
@@ -545,14 +545,14 @@ if (!window.THREE) {
             p[i0 + 2] + (p[i1 + 2] - p[i0 + 2]) * m,
           );
         }
-        const exitSheet = makeSheet(NC, NK, {
+        const exitSheet = makeSheet(COL_COUNT, EXIT_ROWS, {
           opacity: 0.92,
           headWhite: 0.55,
           headK: 5.5,
           alongBase: 0.34,
           alongK: 1.5,
         });
-        const innerSheet = makeSheet(NC, NKI, {
+        const innerSheet = makeSheet(COL_COUNT, INNER_ROWS, {
           opacity: 0.3,
           headWhite: 0.65,
           headK: 4,
@@ -579,11 +579,11 @@ if (!window.THREE) {
         const cross2 = (ax, ay, bx, by) => ax * by - ay * bx;
         function castRay(px, py, dx, dy, skip, out) {
           let best = Infinity,
-            be = -1,
-            bx = 0,
-            by = 0,
-            bnx = 0,
-            bny = 0;
+            bestEdge = -1,
+            bestX = 0,
+            bestY = 0,
+            bestNX = 0,
+            bestNY = 0;
           for (let i = 0; i < 3; i++) {
             if (i === skip) continue;
             const a = TRI[i],
@@ -598,9 +598,9 @@ if (!window.THREE) {
             const s = cross2(wx, wy, dx, dy) / den;
             if (t > 1e-4 && s >= -1e-4 && s <= 1.0001 && t < best) {
               best = t;
-              be = i;
-              bx = px + dx * t;
-              by = py + dy * t;
+              bestEdge = i;
+              bestX = px + dx * t;
+              bestY = py + dy * t;
               let nx = ey,
                 ny = -ex;
               const L = Math.sqrt(nx * nx + ny * ny) || 1;
@@ -612,17 +612,17 @@ if (!window.THREE) {
                 nx = -nx;
                 ny = -ny;
               }
-              bnx = nx;
-              bny = ny;
+              bestNX = nx;
+              bestNY = ny;
             }
           }
-          if (be < 0) return false;
+          if (bestEdge < 0) return false;
           out.t = best;
-          out.x = bx;
-          out.y = by;
-          out.nx = bnx;
-          out.ny = bny;
-          out.edge = be;
+          out.x = bestX;
+          out.y = bestY;
+          out.nx = bestNX;
+          out.ny = bestNY;
+          out.edge = bestEdge;
           return true;
         }
         function refract2(ix, iy, nx, ny, eta, out) {
@@ -656,11 +656,11 @@ if (!window.THREE) {
           len: 0,
           valid: false,
         });
-        const TRACES = Array.from({ length: NC }, makeTraceRec);
+        const TRACES = Array.from({ length: COL_COUNT }, makeTraceRec);
         const CTRACE = makeTraceRec();
         const ENTRY = { valid: false, x: 0, y: 0, nx: 0, ny: 0, edge: -1 };
-        const HIT_E = { t: 0, x: 0, y: 0, nx: 0, ny: 0, edge: -1 };
-        const HIT_I = { t: 0, x: 0, y: 0, nx: 0, ny: 0, edge: -1 };
+        const ENTRY_HIT = { t: 0, x: 0, y: 0, nx: 0, ny: 0, edge: -1 };
+        const WALL_HIT = { t: 0, x: 0, y: 0, nx: 0, ny: 0, edge: -1 };
         const TDIR = { x: 0, y: 0 };
         function trace(n, rec) {
           rec.count = 0;
@@ -678,29 +678,29 @@ if (!window.THREE) {
             skip = ENTRY.edge;
           let len = 0;
           for (let b = 0; b < 3; b++) {
-            if (!castRay(cx, cy, dx, dy, skip, HIT_I)) return;
-            len += HIT_I.t;
-            rec.pts[rec.count].x = HIT_I.x;
-            rec.pts[rec.count].y = HIT_I.y;
+            if (!castRay(cx, cy, dx, dy, skip, WALL_HIT)) return;
+            len += WALL_HIT.t;
+            rec.pts[rec.count].x = WALL_HIT.x;
+            rec.pts[rec.count].y = WALL_HIT.y;
             rec.count++;
-            if (refract2(dx, dy, HIT_I.nx, HIT_I.ny, n, TDIR)) {
-              rec.ex = HIT_I.x;
-              rec.ey = HIT_I.y;
+            if (refract2(dx, dy, WALL_HIT.nx, WALL_HIT.ny, n, TDIR)) {
+              rec.ex = WALL_HIT.x;
+              rec.ey = WALL_HIT.y;
               rec.dx = TDIR.x;
               rec.dy = TDIR.y;
               rec.len = len;
               rec.valid = true;
               return;
             }
-            reflect2(dx, dy, HIT_I.nx, HIT_I.ny, TDIR);
+            reflect2(dx, dy, WALL_HIT.nx, WALL_HIT.ny, TDIR);
             dx = TDIR.x;
             dy = TDIR.y;
-            cx = HIT_I.x;
-            cy = HIT_I.y;
-            skip = HIT_I.edge;
+            cx = WALL_HIT.x;
+            cy = WALL_HIT.y;
+            skip = WALL_HIT.edge;
           }
         }
-        const SEGL = new Float64Array(MAX_TRACE_PTS);
+        const SEG_LEN = new Float64Array(MAX_TRACE_PTS);
         function writeInnerColumn(rec, c, zOff) {
           const rows = innerSheet.rows,
             cnt = rec.count;
@@ -709,19 +709,19 @@ if (!window.THREE) {
           for (let i = 1; i < cnt; i++) {
             const dx = rec.pts[i].x - rec.pts[i - 1].x;
             const dy = rec.pts[i].y - rec.pts[i - 1].y;
-            SEGL[i] = Math.sqrt(dx * dx + dy * dy);
-            total += SEGL[i];
+            SEG_LEN[i] = Math.sqrt(dx * dx + dy * dy);
+            total += SEG_LEN[i];
           }
           if (total < 1e-6) return;
           let seg = 1,
             acc = 0;
           for (let k = 0; k < rows; k++) {
             const target = (total * k) / (rows - 1);
-            while (seg < cnt - 1 && acc + SEGL[seg] < target) {
-              acc += SEGL[seg];
+            while (seg < cnt - 1 && acc + SEG_LEN[seg] < target) {
+              acc += SEG_LEN[seg];
               seg++;
             }
-            const u = SEGL[seg] > 1e-9 ? (target - acc) / SEGL[seg] : 0;
+            const u = SEG_LEN[seg] > 1e-9 ? (target - acc) / SEG_LEN[seg] : 0;
             const a = rec.pts[seg - 1],
               b = rec.pts[seg];
             innerSheet.setPoint(
@@ -736,7 +736,7 @@ if (!window.THREE) {
         function writeExitColumn(c, w, ex, ey, ang0, tA, zOff) {
           const rows = exitSheet.rows,
             step = EXIT_LEN / (rows - 1);
-          const angT = ang0 * (1 - 0.55 * clamp012(Math.cos(ang0)));
+          const angT = ang0 * (1 - 0.55 * clamp01(Math.cos(ang0)));
           let x = ex,
             y = ey;
           for (let k = 0; k < rows; k++) {
@@ -774,7 +774,7 @@ if (!window.THREE) {
             let y = y0 + (y1 - y0) * u;
             const envL = sstep(0.02, 0.18, u);
             const envR = hasEntry
-              ? hermite(clamp012((x1 - x) / 3))
+              ? hermite(clamp01((x1 - x) / 3))
               : sstep(0.02, 0.18, 1 - u);
             y += Math.sin((x - CV * tA) * 0.65) * 0.05 * envL * envR;
             INC_PTS[k].set(x, y, 0);
@@ -827,21 +827,21 @@ if (!window.THREE) {
         const exitGlow = makeSprite(16777215, 0.5, 0, 9);
         const cornerDots = [1, 2].map(() => makeSprite(16777215, 0.085, 0, 9));
         const pulseHex = (w) => new THREE.Color(...specColor(w)).getHex();
-        const NP = 5,
+        const PULSE_COUNT = 5,
           T_EMIT = 2.2,
-          CYCLE = NP * T_EMIT;
-        const whitePulses = Array.from({ length: NP }, () =>
+          CYCLE = PULSE_COUNT * T_EMIT;
+        const whitePulses = Array.from({ length: PULSE_COUNT }, () =>
           makeSprite(16777215, 0.085, 0, 9),
         );
         const colorPulses = PULSE_W.map((w) => {
           const hex = pulseHex(w);
-          return Array.from({ length: NP }, () => makeSprite(hex, 0.075, 0, 9));
+          return Array.from({ length: PULSE_COUNT }, () => makeSprite(hex, 0.075, 0, 9));
         });
-        const PULSE_COL = PULSE_W.map((w) => Math.round(w * (NC - 1)));
+        const PULSE_COL = PULSE_W.map((w) => Math.round(w * (COL_COUNT - 1)));
         const washes = PULSE_W.map((w) => makeSprite(pulseHex(w), 5.5, 0, 2));
         const SAMP = new THREE.Vector3();
         function samplePts(pts, u, out) {
-          const f = clamp012(u) * (pts.length - 1);
+          const f = clamp01(u) * (pts.length - 1);
           const i = Math.min(pts.length - 2, Math.floor(f));
           out.copy(pts[i]).lerp(pts[i + 1], f - i);
         }
@@ -905,10 +905,10 @@ if (!window.THREE) {
           if (velTrail.length > 1) {
             const a = velTrail[0],
               b = velTrail[velTrail.length - 1];
-            const wdt = Math.max((b.t - a.t) / 1e3, 1 / 240);
-            velZ = clamp((b.z - a.z) / wdt, -6, 6);
-            velY = clamp((b.y - a.y) / wdt, -2, 2);
-            velX = clamp((b.x - a.x) / wdt, -2, 2);
+            const delta = Math.max((b.t - a.t) / 1e3, 1 / 240);
+            velZ = clamp((b.z - a.z) / delta, -6, 6);
+            velY = clamp((b.y - a.y) / delta, -2, 2);
+            velX = clamp((b.x - a.x) / delta, -2, 2);
           }
           velTrail = [];
           lastInteract = tGlobal;
@@ -931,24 +931,24 @@ if (!window.THREE) {
         }
         window.addEventListener("resize", onResize);
         onResize();
-        const colAlpha = new Float32Array(NC);
+        const colAlpha = new Float32Array(COL_COUNT);
         let entryAlpha = 0;
         let trapGlow = 0;
         let lastAC = -0.06;
-        const T_OUT = new Float32Array(NC);
+        const T_OUT = new Float32Array(COL_COUNT);
         function castEntry() {
           const sx = viewX.left - 2;
           const sy = RAY.py + (sx - RAY.px) * SLOPE;
           const hit =
-            castRay(sx, sy, RAY.dx, RAY.dy, -1, HIT_E) &&
-            HIT_E.nx * RAY.dx + HIT_E.ny * RAY.dy < -0.001;
+            castRay(sx, sy, RAY.dx, RAY.dy, -1, ENTRY_HIT) &&
+            ENTRY_HIT.nx * RAY.dx + ENTRY_HIT.ny * RAY.dy < -0.001;
           ENTRY.valid = hit;
           if (hit) {
-            ENTRY.x = HIT_E.x;
-            ENTRY.y = HIT_E.y;
-            ENTRY.nx = HIT_E.nx;
-            ENTRY.ny = HIT_E.ny;
-            ENTRY.edge = HIT_E.edge;
+            ENTRY.x = ENTRY_HIT.x;
+            ENTRY.y = ENTRY_HIT.y;
+            ENTRY.nx = ENTRY_HIT.nx;
+            ENTRY.ny = ENTRY_HIT.ny;
+            ENTRY.edge = ENTRY_HIT.edge;
           }
           return hit;
         }
@@ -971,7 +971,7 @@ if (!window.THREE) {
           return aC;
         }
         function updatePulses(tP, dIn, airT, lamp, hasEntry) {
-          for (let s = 0; s < NP; s++) {
+          for (let s = 0; s < PULSE_COUNT; s++) {
             const emit = s * T_EMIT;
             const live = tP >= emit;
             const age = live ? (tP - emit) % CYCLE : 0;
@@ -1015,7 +1015,7 @@ if (!window.THREE) {
           const ease = 1 - Math.exp(-6 * dt);
           entryAlpha += ((hasEntry ? 1 : 0) - entryAlpha) * ease;
           const tP = Math.max(0, tA - T0);
-          const lamp = clamp012(tP / 0.3);
+          const lamp = clamp01(tP / 0.3);
           buildIncoming(tA, hasEntry);
           incoming.update(INC_PTS);
           const x0 = viewX.left - 0.5;
@@ -1027,7 +1027,7 @@ if (!window.THREE) {
             : (viewX.right + 1 - x0) / RAY.dx;
           const airT = dIn / CV;
           const sinceEntry = Math.max(0, tP - airT);
-          incoming.mat.uniforms.uReveal.value = clamp012((CV * tP) / dIn);
+          incoming.mat.uniforms.uReveal.value = clamp01((CV * tP) / dIn);
           if (hasEntry) {
             buildReflect();
             reflectBeam.update(REF_PTS);
@@ -1037,19 +1037,19 @@ if (!window.THREE) {
           const pastEntry = sinceEntry * CV;
           reflectBeam.mat.uniforms.uOpacity.value = 0.09 * entryAlpha;
           residualBeam.mat.uniforms.uOpacity.value = 0.1 * entryAlpha;
-          reflectBeam.mat.uniforms.uReveal.value = clamp012(pastEntry / 6);
-          residualBeam.mat.uniforms.uReveal.value = clamp012(pastEntry / 12);
+          reflectBeam.mat.uniforms.uReveal.value = clamp01(pastEntry / 6);
+          residualBeam.mat.uniforms.uReveal.value = clamp01(pastEntry / 12);
           trace(N_CENTER, CTRACE);
-          for (let c = 0; c < NC; c++) trace(N_COL[c], TRACES[c]);
+          for (let c = 0; c < COL_COUNT; c++) trace(N_COL[c], TRACES[c]);
           const aC = centerAngle();
-          let gx = 0,
-            gy = 0,
-            ga = 0,
+          let glowX = 0,
+            glowY = 0,
+            glowAlpha = 0,
             alive = 0,
             tFirstOut = Infinity;
-          for (let c = 0; c < NC; c++) {
+          for (let c = 0; c < COL_COUNT; c++) {
             const rec = TRACES[c];
-            const w = c / (NC - 1);
+            const w = c / (COL_COUNT - 1);
             colAlpha[c] +=
               ((hasEntry && rec.valid ? 1 : 0) - colAlpha[c]) * ease;
             const zOff = (w - 0.5) * 0.3;
@@ -1070,25 +1070,25 @@ if (!window.THREE) {
             }
             const glassRev =
               rec.len > 1e-6
-                ? clamp012((sinceEntry * (CV / N_COL[c])) / rec.len)
+                ? clamp01((sinceEntry * (CV / N_COL[c])) / rec.len)
                 : 0;
             innerSheet.setAlpha(c, colAlpha[c]);
             innerSheet.setRev(c, glassRev);
             exitSheet.setAlpha(c, colAlpha[c]);
             exitSheet.setRev(
               c,
-              clamp012((Math.max(0, tP - T_OUT[c]) * CV) / EXIT_LEN),
+              clamp01((Math.max(0, tP - T_OUT[c]) * CV) / EXIT_LEN),
             );
             if (rec.valid || colAlpha[c] > 0.05) {
-              gx += rec.ex * colAlpha[c];
-              gy += rec.ey * colAlpha[c];
-              ga += colAlpha[c];
+              glowX += rec.ex * colAlpha[c];
+              glowY += rec.ey * colAlpha[c];
+              glowAlpha += colAlpha[c];
               if (rec.valid && T_OUT[c] < tFirstOut) tFirstOut = T_OUT[c];
             }
           }
           exitSheet.commit();
           innerSheet.commit();
-          const trapT = hasEntry ? (1 - alive / NC) * 0.85 : 0;
+          const trapT = hasEntry ? (1 - alive / COL_COUNT) * 0.85 : 0;
           trapGlow += (trapT - trapGlow) * (1 - Math.exp(-3 * dt));
           innerSheet.mat.uniforms.uOpacity.value = 0.3 * (1 + trapGlow * 1.6);
           for (let i = 0; i < 6; i++) {
@@ -1098,17 +1098,17 @@ if (!window.THREE) {
             washes[i].material.opacity =
               0.05 *
               colAlpha[c] *
-              clamp012((Math.max(0, tP - T_OUT[c]) * CV) / 5);
+              clamp01((Math.max(0, tP - T_OUT[c]) * CV) / 5);
           }
           updatePulses(tP, dIn, airT, lamp, hasEntry);
-          const exitFront = clamp012((Math.max(0, tP - tFirstOut) * CV) / 1.5);
-          if (ga > 0.05) exitGlow.position.set(gx / ga, gy / ga, 0.05);
+          const exitFront = clamp01((Math.max(0, tP - tFirstOut) * CV) / 1.5);
+          if (glowAlpha > 0.05) exitGlow.position.set(glowX / glowAlpha, glowY / glowAlpha, 0.05);
           exitGlow.scale.setScalar(0.5 * (1 + 0.12 * Math.sin(tA * 3)));
           exitGlow.material.opacity =
-            0.9 * clamp012(ga / (NC * 0.5)) * exitFront;
+            0.9 * clamp01(glowAlpha / (COL_COUNT * 0.5)) * exitFront;
           if (hasEntry) entryGlow.position.set(ENTRY.x, ENTRY.y, 0.05);
           entryGlow.material.opacity =
-            0.7 * entryAlpha * clamp012(pastEntry / 0.7);
+            0.7 * entryAlpha * clamp01(pastEntry / 0.7);
           samplePts(INC_PTS, 0.03, SAMP);
           sourceDot.position.copy(SAMP);
           sourceDot.scale.setScalar(0.17 + 0.02 * Math.sin(tA * 2.1));
@@ -1187,9 +1187,9 @@ if (!window.THREE) {
             parTX = mouseNX * 0.38;
             parTY = -mouseNY * 0.22;
           }
-          const pe = 1 - Math.exp(-dt * 3);
-          parX += (parTX - parX) * pe;
-          parY += (parTY - parY) * pe;
+          const ease = 1 - Math.exp(-dt * 3);
+          parX += (parTX - parX) * ease;
+          parY += (parTY - parY) * ease;
           camera.position.set(
             parX + Math.sin(tA * 0.13) * 0.15,
             0.35 + parY + Math.cos(tA * 0.1) * 0.08,

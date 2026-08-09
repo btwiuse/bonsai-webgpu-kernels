@@ -4,13 +4,13 @@ export function setupKernelInspector({ getChat, byId }) {
   let kernels = [];
   let kxCopySource = "";
   $("kernelsBtn").addEventListener("click", openKernels);
-  kernelsOverlay.addEventListener("click", (e2) => {
-    if (e2.target.closest("[data-close]")) closeKernels();
+  kernelsOverlay.addEventListener("click", (e) => {
+    if (e.target.closest("[data-close]")) closeKernels();
   });
   $("kxList").addEventListener("scroll", updateListFade, { passive: true });
   $("kxCopy").addEventListener("click", copyKernel);
-  document.addEventListener("keydown", (e2) => {
-    if (e2.key === "Escape" && !kernelsOverlay.hidden) closeKernels();
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !kernelsOverlay.hidden) closeKernels();
   });
   async function openKernels() {
     const chat = getChat();
@@ -65,8 +65,8 @@ export function setupKernelInspector({ getChat, byId }) {
     if (!k) return;
     $("kxIntro").hidden = true;
     $("kxSource").hidden = false;
-    [...$("kxList").children].forEach((el2, j) =>
-      el2.classList.toggle("active", j === i),
+    [...$("kxList").children].forEach((el, j) =>
+      el.classList.toggle("active", j === i),
     );
     $("kxName").textContent = k.name;
     $("kxLines").textContent = `${k.source.split("\n").length} LINES`;
@@ -153,7 +153,7 @@ export function setupKernelInspector({ getChat, byId }) {
     WGSL_TOKEN.lastIndex = 0;
     let m;
     while ((m = WGSL_TOKEN.exec(src))) {
-      const [tok, comment, attr, ident, num, ws2] = m;
+      const [token, comment, attr, ident, num, ws] = m;
       if (comment) out += `<span class="k-cm">${escapeHtml(comment)}</span>`;
       else if (attr) out += `<span class="k-at">${escapeHtml(attr)}</span>`;
       else if (ident) {
@@ -164,8 +164,8 @@ export function setupKernelInspector({ getChat, byId }) {
             : null;
         out += cls ? `<span class="${cls}">${ident}</span>` : escapeHtml(ident);
       } else if (num) out += `<span class="k-nu">${escapeHtml(num)}</span>`;
-      else if (ws2) out += ws2;
-      else out += escapeHtml(tok);
+      else if (ws) out += ws;
+      else out += escapeHtml(token);
     }
     return out;
   }
