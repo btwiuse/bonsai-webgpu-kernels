@@ -2,8 +2,8 @@
 // Builds dynamic BufferGeometries with side+tangent attributes for beams
 // and column-typed attributes for spectral sheets.
 
-import { BEAM_FRAG, BEAM_VERT, SHEET_FRAG, SHEET_VERT } from "./scene-prism-shaders.js";
-import { specColor } from "./scene-prism-optics.js";
+import { BEAM_FRAG, BEAM_VERT, SHEET_FRAG, SHEET_VERT } from "./shaders.js";
+import { specColor } from "./optics.js";
 
 // Three vertices of the equilateral triangle (circumradius R).
 const TAU = Math.PI * 2;

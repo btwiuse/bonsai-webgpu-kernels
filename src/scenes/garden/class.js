@@ -1,11 +1,11 @@
 // GardenScene — the main class for the loading-stage bonsai garden.
 //
 // Methods are composed from two mixin modules by topic:
-//   - scene-garden-init.js   (init* family + start)
-//   - scene-garden-update.js (per-frame update family + animate)
+//   - init.js   (init* family + start)
+//   - update.js (per-frame update family + animate)
 
-import { GardenInitMethods } from "./scene-garden-init.js";
-import { GardenUpdateMethods } from "./scene-garden-update.js";
+import { GardenInitMethods } from "./init.js";
+import { GardenUpdateMethods } from "./update.js";
 
 export class GardenScene {
   constructor() {

@@ -1,5 +1,5 @@
-// Main-thread facade for model-worker.js. Its public surface matches Bonsai27B's chat wrapper.
-import { loadBitgpuKernelSources } from "./bitgpu-kernel-sources.js";
+// Main-thread facade for worker.js. Its public surface matches Bonsai27B's chat wrapper.
+import { loadBitgpuKernelSources } from "./kernel/sources.js";
 export class WorkerBonsai27B {
   static async checkAvailability(...args) {
     return globalThis.navigator?.gpu
@@ -8,7 +8,7 @@ export class WorkerBonsai27B {
   }
 
   static async load(source, options = {}) {
-    const worker = new Worker(new URL("./model-worker.js", import.meta.url), {
+    const worker = new Worker(new URL("./worker.js", import.meta.url), {
       type: "module",
     });
     const client = new WorkerChatClient(worker);

@@ -1,8 +1,8 @@
 // GardenScene per-frame update methods.
 //
-// Composed into GardenScene.prototype by `scene-garden-class.js`.
+// Composed into GardenScene.prototype by `class.js`.
 
-import { clamp, easeOutBack, easeOutCubic, lerp, MOT, TAU } from "./scene-garden-utils.js";
+import { clamp, easeOutBack, easeOutCubic, lerp, MOT, TAU } from "./utils.js";
 
 const PET_N = 110;
 

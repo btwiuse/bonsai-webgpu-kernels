@@ -1,6 +1,6 @@
 // Blossom packing: positions + colors for a cloud of micro-meshes per pad.
 
-import { blossomMat, MOSS_GEO, padPalette, WHITE } from "./scene-garden-assets.js";
+import { blossomMat, MOSS_GEO, padPalette, WHITE } from "./assets.js";
 
 let blossomTpl = null;
 

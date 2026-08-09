@@ -1,8 +1,8 @@
 // PrismScene drag, resize, camera and per-frame loop methods.
 //
-// Composed into PrismScene.prototype by `scene-prism-class.js`.
+// Composed into PrismScene.prototype by `class.js`.
 
-import { clamp, clamp01, SPD } from "./scene-prism-utils.js";
+import { clamp, clamp01, SPD } from "./utils.js";
 
 const TAU = Math.PI * 2;
 const THIRD = TAU / 3;

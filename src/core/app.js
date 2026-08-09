@@ -1,8 +1,8 @@
-import { Bonsai27B, DEFAULT_GGUF_FILE } from "./bonsai-adapter.js";
-import { WorkerBonsai27B } from "./worker-bonsai-client.js";
-import { setupModelAccess } from "./model-access.js";
-import { renderAnswer } from "./markdown-renderer.js";
-import { setupKernelInspector } from "./kernel-inspector.js";
+import { Bonsai27B, DEFAULT_GGUF_FILE } from "../model/adapter.js";
+import { WorkerBonsai27B } from "../model/bonsai-client.js";
+import { setupModelAccess } from "../model/access.js";
+import { renderAnswer } from "../chat/markdown.js";
+import { setupKernelInspector } from "../model/kernel/inspector.js";
 
 const $ = (id) => document.getElementById(id);
 const queryParams = new URLSearchParams(location.search);

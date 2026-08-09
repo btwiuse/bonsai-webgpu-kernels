@@ -1,7 +1,7 @@
 // Spectral optics: Cauchy dispersion + visible-wavelength color mapping.
 // Pure functions, no THREE dependency.
 
-import { COL_COUNT } from "./scene-prism-constants.js";
+import { COL_COUNT } from "./constants.js";
 
 // Cauchy's equation: n(λ) = A + B/λ².
 // Calibrated so n(650 nm) = 1.115 and n(410 nm) = 1.228.

@@ -4,15 +4,7 @@
 // with a (t0, t1) growth window so the GardenScene animation can reveal it
 // over time. Uses a seeded RNG so the same seed always produces the same tree.
 
-import {
-  clamp,
-  easeOutBack,
-  easeOutCubic,
-  lerp,
-  mulberry32,
-  TAU,
-  UP,
-} from "./scene-garden-utils.js";
+import { clamp, easeOutBack, easeOutCubic, lerp, mulberry32, TAU, UP } from "./utils.js";
 import {
   barkMat,
   blossomMat,
@@ -22,8 +14,8 @@ import {
   mossMatB,
   padPalette,
   WHITE,
-} from "./scene-garden-assets.js";
-import { makeBlossoms } from "./scene-garden-blossom.js";
+} from "./assets.js";
+import { makeBlossoms } from "./blossom.js";
 
 // Per-depth growth duration + segment count.
 const DUR = [0.3, 0.13, 0.09, 0.07];
@@ -455,4 +447,4 @@ export class TreeBuilder {
 }
 
 // Re-export the colorspace helper for pad sprite use.
-import { SC } from "./scene-garden-utils.js";
+import { SC } from "./utils.js";

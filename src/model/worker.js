@@ -1,6 +1,6 @@
 // Optional off-main-thread host for bitgpu. It deliberately owns the real chat object;
 // the page receives only serializable progress and stream events.
-import { Bonsai27B } from "./bonsai-adapter.js";
+import { Bonsai27B } from "./adapter.js";
 
 let chat = null;
 let generationAbort = null;

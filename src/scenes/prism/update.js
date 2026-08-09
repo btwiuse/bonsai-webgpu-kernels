@@ -1,6 +1,6 @@
 // PrismScene per-column + per-frame update methods.
 //
-// Composed into PrismScene.prototype by `scene-prism-class.js`.
+// Composed into PrismScene.prototype by `class.js`.
 
 import {
   COL_COUNT,
@@ -13,9 +13,9 @@ import {
   SPREAD,
   T0,
   T_EMIT,
-} from "./scene-prism-constants.js";
-import { clamp01, RAY, SLOPE, wrapPI } from "./scene-prism-utils.js";
-import { samplePts, sampleSheet } from "./scene-prism-geometry.js";
+} from "./constants.js";
+import { clamp01, RAY, SLOPE, wrapPI } from "./utils.js";
+import { samplePts, sampleSheet } from "./geometry.js";
 
 export const PrismUpdateMethods = {
   // Per-column update: opacity ease, exit/inner columns, sheet attrs.

@@ -1,11 +1,11 @@
 // PrismScene geometry + optics methods: triangle updates, ray casts,
 // multi-bounce traces, sheet writers.
 //
-// Composed into PrismScene.prototype by `scene-prism-class.js`.
+// Composed into PrismScene.prototype by `class.js`.
 
-import { CV, EXIT_LEN } from "./scene-prism-constants.js";
-import { clamp01, hermite as smoothEase, RAY, SLOPE, sstep } from "./scene-prism-utils.js";
-import { cross2, reflect2, refract2 } from "./scene-prism-trace.js";
+import { CV, EXIT_LEN } from "./constants.js";
+import { clamp01, hermite as smoothEase, RAY, SLOPE, sstep } from "./utils.js";
+import { cross2, reflect2, refract2 } from "./trace.js";
 
 export const PrismTraceMethods = {
   // Update the triangle's 2D vertex positions for current rotation+bob.

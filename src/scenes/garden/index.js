@@ -4,7 +4,7 @@
 // when THREE is present (the renderer either fails and falls back to
 // flatMode, or succeeds and is wired into App.startGarden).
 
-import { GardenScene } from "./scene-garden-class.js";
+import { GardenScene } from "./class.js";
 
 if (typeof THREE !== "undefined") {
   const garden = new GardenScene();

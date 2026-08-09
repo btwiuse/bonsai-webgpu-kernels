@@ -1,11 +1,11 @@
 // GardenScene initialisation methods — renderer, scene, lights, props,
 // tree, petals, and event wiring.
 //
-// Composed into GardenScene.prototype by `scene-garden-class.js`.
+// Composed into GardenScene.prototype by `class.js`.
 
-import { clamp, lerp, MOT, SC, TAU } from "./scene-garden-utils.js";
-import { glowTex, groundTex, petalTex, shadowTex } from "./scene-garden-assets.js";
-import { TreeBuilder } from "./scene-garden-tree.js";
+import { clamp, lerp, MOT, SC, TAU } from "./utils.js";
+import { glowTex, groundTex, petalTex, shadowTex } from "./assets.js";
+import { TreeBuilder } from "./tree.js";
 
 // Loader-provided globals; loader.js runs first as a plain script.
 const SEED = window.SEED;

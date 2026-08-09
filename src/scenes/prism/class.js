@@ -1,16 +1,16 @@
 // PrismScene — the main class for the landing prism scene.
 //
 // Methods are composed from three mixin modules by topic:
-//   - scene-prism-init.js         (constructor and init* family)
-//   - scene-prism-trace-methods.js (trace, castRay, sheet writers)
-//   - scene-prism-update.js       (per-column and per-frame updates)
-//   - scene-prism-frame.js        (drag, resize, animate)
+//   - init.js         (constructor and init* family)
+//   - trace-methods.js (trace, castRay, sheet writers)
+//   - update.js       (per-column and per-frame updates)
+//   - frame.js        (drag, resize, animate)
 
-import { N_COL } from "./scene-prism-optics.js";
-import { PrismInitMethods } from "./scene-prism-init.js";
-import { PrismTraceMethods } from "./scene-prism-trace-methods.js";
-import { PrismUpdateMethods } from "./scene-prism-update.js";
-import { PrismFrameMethods } from "./scene-prism-frame.js";
+import { N_COL } from "./optics.js";
+import { PrismInitMethods } from "./init.js";
+import { PrismTraceMethods } from "./trace-methods.js";
+import { PrismUpdateMethods } from "./update.js";
+import { PrismFrameMethods } from "./frame.js";
 
 export class PrismScene {
   constructor() {
@@ -44,7 +44,7 @@ Object.assign(PrismScene.prototype, PrismTraceMethods);
 Object.assign(PrismScene.prototype, PrismUpdateMethods);
 Object.assign(PrismScene.prototype, PrismFrameMethods);
 
-// Convenience boot entry used by `scene-prism-index.js`.
+// Convenience boot entry used by `index.js`.
 export function bootPrismScene() {
   if (window.App._landingBooted) return;
   window.App._landingBooted = true;

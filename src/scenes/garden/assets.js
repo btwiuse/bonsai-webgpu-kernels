@@ -2,7 +2,7 @@
 // garden scene. Built once at module load; the rest of the scene consumes
 // these as singletons.
 
-import { SC } from "./scene-garden-utils.js";
+import { SC } from "./utils.js";
 
 // Generic canvas-texture helper: draw into a square canvas with size `size`.
 export function canvasTex(size, draw) {

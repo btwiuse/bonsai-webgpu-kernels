@@ -1,7 +1,7 @@
 // PrismScene initialisation methods — wireframe renderer, geometry, beams,
 // sheets, sprites, traces, and event listeners.
 //
-// Composed into PrismScene.prototype by `scene-prism-class.js`.
+// Composed into PrismScene.prototype by `class.js`.
 
 import {
   COL_COUNT,
@@ -14,19 +14,19 @@ import {
   R,
   REF_N,
   RES_N,
-} from "./scene-prism-constants.js";
-import { specColor } from "./scene-prism-optics.js";
-import { pulseHex } from "./scene-prism-pulse.js";
-import { LOCAL_V, vecArray } from "./scene-prism-geometry.js";
+} from "./constants.js";
+import { specColor } from "./optics.js";
+import { pulseHex } from "./pulse.js";
+import { LOCAL_V, vecArray } from "./geometry.js";
 import {
   createBeamGeometry,
   createBeamMaterial,
   createSheetGeometry,
   createSheetMaterial,
-} from "./scene-prism-geometry.js";
-import { makeTraceRec } from "./scene-prism-trace.js";
-import { GLASS_FRAG, GLASS_VERT } from "./scene-prism-shaders.js";
-import { makeGlowTexture, makeWordTexture } from "./scene-prism-textures.js";
+} from "./geometry.js";
+import { makeTraceRec } from "./trace.js";
+import { GLASS_FRAG, GLASS_VERT } from "./shaders.js";
+import { makeGlowTexture, makeWordTexture } from "./textures.js";
 
 const WHITE = 0xffffff;
 const ENTRY_GLOW = 0xddffff;

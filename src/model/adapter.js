@@ -5,14 +5,14 @@
 import { createEngine } from "https://cdn.jsdelivr.net/npm/bitgpu@0.19.1/dist/index.js";
 import { createChat } from "https://cdn.jsdelivr.net/npm/bitgpu@0.19.1/dist/chat.js";
 import { fromGguf } from "https://cdn.jsdelivr.net/npm/bitgpu@0.19.1/dist/gguf.js";
-import { BONSAI_27B, resolveGgufUrl, tokenizerDirectory } from "./model-catalog.js";
-import { createModelFetch } from "./model-fetch.js";
-import { streamChatEvents } from "./chat-events.js";
-import { loadBitgpuKernelSources } from "./bitgpu-kernel-sources.js";
+import { BONSAI_27B, resolveGgufUrl, tokenizerDirectory } from "./catalog.js";
+import { createModelFetch } from "./fetch.js";
+import { streamChatEvents } from "../chat/events.js";
+import { loadBitgpuKernelSources } from "./kernel/sources.js";
 
 export const DEFAULT_MODEL_ID = BONSAI_27B.id;
 export const DEFAULT_GGUF_FILE = BONSAI_27B.ggufFile;
-export { resolveGgufUrl as resolveGGUFUrl } from "./model-catalog.js";
+export { resolveGgufUrl as resolveGGUFUrl } from "./catalog.js";
 
 const DEFAULT_CONTEXT_LENGTH = 4096;
 function createProgressReporter(onProgress) {

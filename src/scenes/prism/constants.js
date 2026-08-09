@@ -1,7 +1,7 @@
 // Scene-wide numeric constants for the prism scene.
 // Group geometry, row counts, light propagation, pulse cadence.
 
-import { SPD } from "./scene-prism-utils.js";
+import { SPD } from "./utils.js";
 
 // Triangular prism geometry (regular triangle, circumradius R).
 export const R = 1.85;
