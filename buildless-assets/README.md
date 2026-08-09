@@ -13,7 +13,11 @@ installation is required.
 | `markdown-renderer.js` | Incremental Markdown and KaTeX answer rendering |
 | `kernel-inspector.js` | Kernel-source dialog and search UI |
 | `bonsai-adapter.js` | Model URL resolution, Hugging Face access-token requests, loading progress, and the UI-facing streaming chat contract |
-| `landing.css`, `app.css` | Landing and chat styles |
+| `landing.css` | Landing composition and transition styles |
+| `access-gate.css` | Hugging Face access-gate styles |
+| `chat.css` | Chat layout, messages, composer, and Markdown styles |
+| `kernel-inspector.css` | Kernel-source dialog styles |
+| `app.css` | Shared overrides and final responsive rules |
 | `config.js` | Runtime access-gate configuration |
 
 The GPU implementation is loaded as pinned browser ESM from jsDelivr:
