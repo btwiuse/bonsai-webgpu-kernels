@@ -1,0 +1,2612 @@
+"use strict";
+const QS = new URLSearchParams(location.search);
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const FREEZE = QS.has("p")
+  ? Math.min(1, Math.max(0, parseFloat(QS.get("p")) || 0))
+  : null;
+const SPEED = Math.max(0.1, parseFloat(QS.get("speed")) || 1);
+const SEED = QS.has("seed")
+  ? parseInt(QS.get("seed"), 10) >>> 0
+  : (Math.random() * 1e9) | 0;
+const AZ_FIX = QS.has("az")
+  ? ((parseFloat(QS.get("az")) || 0) * Math.PI) / 180
+  : null;
+const TOTAL_BYTES = 38e8;
+const SHARDS = 32;
+const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+const lerp01 = (a, b, t) => a + (b - a) * t;
+const state = {
+  target: 0,
+  shown: 0,
+  rate: 0,
+  lastT: 0,
+  lastBytes: 0,
+  shard: 0,
+  phaseOverride: null,
+  external: false,
+  doneAt: 0,
+  totalBytes: TOTAL_BYTES,
+  tensors: 0,
+  tensorsTotal: 0,
+  externalDone: false,
+};
+const readyCbs = [];
+window.BonsaiLoader = {
+  set(loadedBytes, totalBytes = TOTAL_BYTES, meta = {}) {
+    state.external = true;
+    state.totalBytes = totalBytes;
+    const now = performance.now() / 1e3;
+    if (state.lastT > 0) {
+      const dt = now - state.lastT;
+      if (dt > 0.05) {
+        const inst = (loadedBytes - state.lastBytes) / dt;
+        state.rate = state.rate ? lerp01(state.rate, inst, 0.2) : inst;
+        state.lastT = now;
+        state.lastBytes = loadedBytes;
+      }
+    } else {
+      state.lastT = now;
+      state.lastBytes = loadedBytes;
+    }
+    state.target = clamp01(loadedBytes / totalBytes);
+    if (meta.shard) state.shard = meta.shard;
+  },
+  info({ tensors, tensorsTotal } = {}) {
+    if (tensors !== void 0) state.tensors = tensors;
+    if (tensorsTotal !== void 0) state.tensorsTotal = tensorsTotal;
+  },
+  phase(text) {
+    state.phaseOverride = text;
+  },
+  done() {
+    state.externalDone = true;
+    state.external = true;
+    state.target = 1;
+    state.phaseOverride = null;
+  },
+  onReady(fn) {
+    readyCbs.push(fn);
+  },
+};
+const shardOf = (f) =>
+  Math.min(SHARDS, 1 + Math.floor(clamp01(f / 0.9) * SHARDS));
+function deriveStatus(f) {
+  if (f >= 1)
+    return state.external ? "READY" : "READY — MODEL RESIDENT IN VRAM";
+  if (state.external) {
+    return "STREAMING WEIGHTS → VRAM";
+  }
+  if (f > 0.985) return "ALLOCATING KV CACHE · WARMUP";
+  if (f > 0.95) return "COMPILING WEBGPU KERNELS";
+  if (f > 0.9) return "VERIFYING SHARD CHECKSUMS";
+  if (f > 0.015)
+    return "STREAMING WEIGHTS — SHARD " + shardOf(f) + "/" + SHARDS;
+  return "REQUESTING MANIFEST";
+}
+function simulate() {
+  let simBytes = 0,
+    stallUntil = 0,
+    prev = performance.now() / 1e3;
+  const t0 = prev;
+  const tick = () => {
+    if (state.doneAt) return;
+    const now = performance.now() / 1e3,
+      t = now - t0;
+    const dt = Math.min(now - prev, 0.25);
+    prev = now;
+    if (t > 0.7 && now > stallUntil) {
+      if (Math.random() < 0.35 * dt)
+        stallUntil = now + 0.4 + Math.random() * 0.8;
+      const frac = simBytes / TOTAL_BYTES;
+      const phaseMul =
+        frac > 0.985 ? 0.1 : frac > 0.95 ? 0.16 : frac > 0.9 ? 0.35 : 1;
+      const mbps =
+        (150 + 55 * Math.sin(t * 0.5) + (Math.random() - 0.5) * 60) * phaseMul;
+      simBytes = Math.min(TOTAL_BYTES, simBytes + mbps * 1e6 * SPEED * dt);
+      BonsaiLoader.set(simBytes, TOTAL_BYTES);
+      state.external = false;
+    }
+    requestAnimationFrame(tick);
+  };
+  tick();
+}
+const byId = (id) => document.getElementById(id);
+const el = {
+  pct: byId("pct"),
+  status: byId("status"),
+  statA: byId("statA"),
+  bar: byId("barFill"),
+  prog: byId("uiLoad"),
+};
+const GB = (b) => (b / 1e9).toFixed(2);
+const fmtEta = (s) => {
+  if (!isFinite(s) || s <= 0) return "";
+  const m = Math.floor(s / 60),
+    ss = Math.ceil(s % 60);
+  return " · ETA " + m + ":" + String(ss).padStart(2, "0");
+};
+let lastDom = 0;
+function updateDom(now) {
+  if (now - lastDom < 0.12 && !state.doneAt) return;
+  lastDom = now;
+  const f = state.shown;
+  const pctInt = state.doneAt ? 100 : Math.min(99, Math.floor(f * 100));
+  el.pct.textContent = pctInt;
+  el.prog.setAttribute("aria-valuenow", pctInt);
+  el.bar.style.width = (f * 100).toFixed(1) + "%";
+  el.status.textContent =
+    state.phaseOverride || deriveStatus(state.doneAt ? 1 : f);
+  if (state.doneAt) {
+    el.statA.textContent = state.external
+      ? GB(state.totalBytes) + " GB RESIDENT IN VRAM"
+      : GB(state.totalBytes) +
+        " / " +
+        GB(state.totalBytes) +
+        " GB · " +
+        SHARDS +
+        "/" +
+        SHARDS +
+        " · COMPLETE";
+  } else {
+    const total = state.totalBytes;
+    const bytes = f * total;
+    const rate =
+      state.rate > 1e5 ? " · " + Math.round(state.rate / 1e6) + " MB/S" : "";
+    const eta = state.rate > 1e5 ? fmtEta((total - bytes) / state.rate) : "";
+    const seg = state.external
+      ? state.tensorsTotal
+        ? " · TENSOR " + state.tensors + "/" + state.tensorsTotal
+        : ""
+      : " · SHARD " + (state.shard || shardOf(f)) + "/" + SHARDS;
+    el.statA.textContent =
+      GB(bytes) + " / " + GB(total) + " GB" + seg + rate + eta;
+  }
+}
+function stepProgress(dt, now) {
+  if (FREEZE !== null) {
+    state.target = state.shown = FREEZE;
+  } else {
+    state.shown += (state.target - state.shown) * Math.min(1, dt * 3.2);
+    if (state.target >= 0.9999 && state.shown > 0.9995) state.shown = 1;
+  }
+  if (
+    state.shown >= 1 &&
+    !state.doneAt &&
+    (!state.external || state.externalDone)
+  ) {
+    state.doneAt = now;
+    document.body.classList.add("done");
+    for (const fn of readyCbs) fn();
+  }
+  return state.shown;
+}
+const START_STAGE =
+  FREEZE !== null ||
+  QS.has("az") ||
+  QS.has("seed") ||
+  QS.get("stage") === "loading"
+    ? "loading"
+    : "landing";
+const App = {
+  stage: START_STAGE,
+  landingActive: START_STAGE === "landing",
+  startGarden: null,
+  _disposeLanding: null,
+  go() {
+    if (this.stage !== "landing") return;
+    this.stage = "loading";
+    document.body.classList.remove("stage-landing");
+    document.body.classList.add("stage-loading");
+    if (this.startGarden) this.startGarden();
+    if (window.BonsaiApp) window.BonsaiApp.startLoad();
+    if (FREEZE === null && QS.has("demo"))
+      setTimeout(() => {
+        if (!state.external) simulate();
+      }, 900);
+    setTimeout(() => {
+      this.landingActive = false;
+      if (this._disposeLanding) this._disposeLanding();
+    }, 1600);
+  },
+  flatMode() {
+    document.body.classList.add("flat", "ready", "spectrum", "stage-loading");
+    document.body.classList.remove("stage-landing");
+    let prev = performance.now() / 1e3;
+    (function flatLoop() {
+      requestAnimationFrame(flatLoop);
+      const now = performance.now() / 1e3;
+      const dt = Math.min(now - prev, 0.05);
+      prev = now;
+      stepProgress(dt, now);
+      updateDom(now);
+    })();
+    if (window.BonsaiApp) window.BonsaiApp.startLoad();
+    if (FREEZE === null && QS.has("demo"))
+      setTimeout(() => {
+        if (!state.external) simulate();
+      }, 700);
+  },
+};
+window.App = App;
+byId("loadCta").addEventListener("click", (e) => {
+  e.preventDefault();
+  App.go();
+});
+if (window.THREE)
+  (function () {
+    const canvas = byId("sceneBG");
+    let renderer;
+    try {
+      renderer = new THREE.WebGLRenderer({
+        canvas,
+        antialias: true,
+        alpha: false,
+        powerPreference: "high-performance",
+      });
+    } catch (err) {
+      return;
+    }
+    renderer.setClearColor(329225, 1);
+    const DPR = Math.min(window.devicePixelRatio || 1, 2);
+    renderer.setPixelRatio(DPR);
+    const SPD = REDUCED ? 0.35 : 1;
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
+    let camZ = 9.6;
+    function makeGlowTexture() {
+      const c = document.createElement("canvas");
+      c.width = c.height = 128;
+      const g = c.getContext("2d");
+      const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+      grd.addColorStop(0, "rgba(255,255,255,1)");
+      grd.addColorStop(0.22, "rgba(255,255,255,.85)");
+      grd.addColorStop(0.55, "rgba(255,255,255,.18)");
+      grd.addColorStop(1, "rgba(255,255,255,0)");
+      g.fillStyle = grd;
+      g.fillRect(0, 0, 128, 128);
+      const t2 = new THREE.CanvasTexture(c);
+      t2.minFilter = THREE.LinearFilter;
+      return t2;
+    }
+    function makeWordTexture(word2) {
+      const W = 2048,
+        H = 400;
+      const c = document.createElement("canvas");
+      c.width = W;
+      c.height = H;
+      const g = c.getContext("2d");
+      g.fillStyle = "#ffffff";
+      g.textBaseline = "middle";
+      const font = (px2) =>
+        `700 ${px2}px 'Inter','SF Pro Display',-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif`;
+      const measure = (px2, sp2) => {
+        g.font = font(px2);
+        let t3 = -sp2;
+        for (const ch of word2) t3 += g.measureText(ch).width + sp2;
+        return t3;
+      };
+      let px = 250,
+        sp = 70;
+      const total0 = measure(px, sp);
+      const fit = Math.min(1, (W - 120) / total0);
+      px *= fit;
+      sp *= fit;
+      let x = (W - measure(px, sp)) / 2;
+      for (const ch of word2) {
+        g.fillText(ch, x, H / 2 + 10 * fit);
+        x += g.measureText(ch).width + sp;
+      }
+      const t2 = new THREE.CanvasTexture(c);
+      t2.minFilter = THREE.LinearFilter;
+      return { texture: t2, aspect: H / W };
+    }
+    const glowTex = makeGlowTexture();
+    const word = makeWordTexture("BONSAI 27B");
+    const TP = { z: -5, cx: 0, cy: 0.15, hw: 8.6, hh: 8.6 * word.aspect };
+    const textMat = new THREE.MeshBasicMaterial({
+      map: word.texture,
+      transparent: true,
+      opacity: 0.06,
+      depthWrite: false,
+      depthTest: false,
+    });
+    const textPlane = new THREE.Mesh(
+      new THREE.PlaneGeometry(TP.hw * 2, TP.hh * 2),
+      textMat,
+    );
+    textPlane.position.set(TP.cx, TP.cy, TP.z);
+    textPlane.renderOrder = 1;
+    scene.add(textPlane);
+    const gridMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      depthTest: false,
+      blending: THREE.AdditiveBlending,
+      vertexShader: `
+      varying vec2 vP;
+      void main(){
+        vP = position.xy;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+      fragmentShader: `
+      varying vec2 vP;
+      void main(){
+        vec2 g = abs(fract(vP / 2.2) - 0.5);
+        float lx = smoothstep(0.487, 0.5, g.x);
+        float ly = smoothstep(0.487, 0.5, g.y);
+        float line = max(lx, ly);
+        float r = length(vP * vec2(1.0, 1.6));
+        float vig = 1.0 - smoothstep(5.0, 20.0, r);
+        float glow = exp(-r * r * 0.020) * 0.16;
+        vec3 col = vec3(0.30, 0.36, 0.52) * line * 0.09 * vig
+                 + vec3(0.10, 0.12, 0.20) * glow;
+        gl_FragColor = vec4(col, 1.0);
+      }`,
+    });
+    const grid = new THREE.Mesh(new THREE.PlaneGeometry(60, 32), gridMat);
+    grid.position.set(0, 0.2, -8);
+    grid.renderOrder = 0;
+    scene.add(grid);
+    const backlight = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: glowTex,
+        color: 8359867,
+        transparent: true,
+        opacity: 0.07,
+        blending: THREE.AdditiveBlending,
+        depthTest: false,
+        depthWrite: false,
+      }),
+    );
+    backlight.scale.setScalar(11);
+    backlight.position.set(0.4, 0.3, -4);
+    backlight.renderOrder = 2;
+    scene.add(backlight);
+    const DUST_N = 160;
+    const dustGeo = new THREE.BufferGeometry();
+    {
+      const pos = new Float32Array(DUST_N * 3);
+      const seed = new Float32Array(DUST_N);
+      for (let i = 0; i < DUST_N; i++) {
+        pos[i * 3] = (Math.random() * 2 - 1) * 11;
+        pos[i * 3 + 1] = (Math.random() * 2 - 1) * 6;
+        pos[i * 3 + 2] = -6 + Math.random() * 8;
+        seed[i] = Math.random();
+      }
+      dustGeo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      dustGeo.setAttribute("aSeed", new THREE.BufferAttribute(seed, 1));
+    }
+    const dustMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      depthTest: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: { uTime: { value: 0 }, uDpr: { value: DPR } },
+      vertexShader: `
+      attribute float aSeed;
+      uniform float uTime; uniform float uDpr;
+      varying float vA;
+      void main(){
+        vec3 p = position;
+        p.x += sin(uTime * 0.12 + aSeed * 7.0) * 0.6;
+        p.y += cos(uTime * 0.10 + aSeed * 13.0) * 0.4;
+        vec4 mv = modelViewMatrix * vec4(p, 1.0);
+        gl_PointSize = (1.5 + aSeed * 2.5) * (14.0 / -mv.z) * uDpr;
+        vA = 0.5 + 0.5 * sin(uTime * (0.4 + aSeed * 0.7) + aSeed * 20.0);
+        gl_Position = projectionMatrix * mv;
+      }`,
+      fragmentShader: `
+      varying float vA;
+      void main(){
+        float d = length(gl_PointCoord - 0.5);
+        float a = smoothstep(0.5, 0.1, d) * vA * 0.35;
+        gl_FragColor = vec4(0.75, 0.80, 0.95, a);
+      }`,
+    });
+    const dust = new THREE.Points(dustGeo, dustMat);
+    dust.frustumCulled = false;
+    dust.renderOrder = 2;
+    scene.add(dust);
+    function onResize() {
+      const w = window.innerWidth,
+        h = window.innerHeight;
+      renderer.setSize(w, h);
+      const aspect = w / h;
+      camera.aspect = aspect;
+      camZ = Math.min(9.6 / Math.min(1, aspect / 1.15), 15.5);
+      camera.updateProjectionMatrix();
+    }
+    window.addEventListener("resize", onResize);
+    onResize();
+    const clock = new THREE.Clock();
+    let t = 0;
+    (function animate() {
+      if (document.body.classList.contains("stage-chat")) return;
+      requestAnimationFrame(animate);
+      t += Math.min(clock.getDelta(), 0.05);
+      const tA = t * SPD;
+      dustMat.uniforms.uTime.value = tA;
+      textMat.opacity = 0.05 + 0.02 * (0.5 + 0.5 * Math.sin(tA * 0.35));
+      backlight.material.opacity =
+        0.06 + 0.02 * (0.5 + 0.5 * Math.sin(tA * 0.6));
+      camera.position.set(
+        Math.sin(tA * 0.13) * 0.15,
+        0.35 + Math.cos(tA * 0.1) * 0.08,
+        camZ,
+      );
+      camera.lookAt(0, 0.05, 0);
+      renderer.render(scene, camera);
+    })();
+  })();
+if (!window.THREE) {
+  App.flatMode();
+} else if (START_STAGE === "landing") {
+  App.bootLanding = function () {
+    if (App._landingBooted) return;
+    App._landingBooted = true;
+    (function () {
+      const SPD = matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? 0.35
+        : 1;
+      const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+      const clamp012 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+      const hermite = (x) => x * x * (3 - 2 * x);
+      const sstep = (a, b, x) => hermite(clamp012((x - a) / (b - a)));
+      const wrapPI = (a) => {
+        while (a > Math.PI) a -= Math.PI * 2;
+        while (a < -Math.PI) a += Math.PI * 2;
+        return a;
+      };
+      function boot() {
+        if (!window.THREE) throw new Error("three.js failed to load");
+        const R = 1.85;
+        const DEPTH = 2.1;
+        const N_CENTER = 1.17;
+        const SPREAD = 3;
+        const L_RED = 650,
+          L_VIOLET = 410;
+        const CAU_B =
+          (1.228 - 1.115) / (1 / (L_VIOLET * L_VIOLET) - 1 / (L_RED * L_RED));
+        const CAU_A = 1.115 - CAU_B / (L_RED * L_RED);
+        const lambdaOf = (w) => L_RED + (L_VIOLET - L_RED) * w;
+        const nOf = (w) => {
+          const l = lambdaOf(w);
+          return CAU_A + CAU_B / (l * l);
+        };
+        function waveColor(l) {
+          let r, g, b;
+          if (l < 440) {
+            r = -(l - 440) / 60;
+            g = 0;
+            b = 1;
+          } else if (l < 490) {
+            r = 0;
+            g = (l - 440) / 50;
+            b = 1;
+          } else if (l < 510) {
+            r = 0;
+            g = 1;
+            b = -(l - 510) / 20;
+          } else if (l < 580) {
+            r = (l - 510) / 70;
+            g = 1;
+            b = 0;
+          } else if (l < 645) {
+            r = 1;
+            g = -(l - 645) / 65;
+            b = 0;
+          } else {
+            r = 1;
+            g = 0;
+            b = 0;
+          }
+          const f =
+            l < 420
+              ? 0.45 + (0.55 * (l - 395)) / 25
+              : l > 645
+                ? 0.5 + (0.5 * (700 - l)) / 55
+                : 1;
+          return [r * f, g * f, b * f];
+        }
+        const specColor = (w) => waveColor(lambdaOf(w));
+        const NC = 24;
+        const NK = 40;
+        const NKI = 8;
+        const N_COL = Array.from({ length: NC }, (_, c) => nOf(c / (NC - 1)));
+        const PULSE_W = [0, 0.2, 0.4, 0.6, 0.8, 1];
+        const TILT = 0.12;
+        const RAY = { px: 0, py: 0.12, dx: Math.cos(TILT), dy: Math.sin(TILT) };
+        const SLOPE = RAY.dy / RAY.dx;
+        const LIGHT_SPEED = 4;
+        const CV = LIGHT_SPEED / SPD;
+        const T0 = 0.25;
+        const EXIT_LEN = 13.5;
+        const canvas = document.getElementById("sceneA");
+        const renderer = new THREE.WebGLRenderer({
+          canvas,
+          antialias: true,
+          alpha: true,
+          powerPreference: "high-performance",
+        });
+        renderer.setClearColor(329225, 0);
+        const DPR = Math.min(window.devicePixelRatio || 1, 2);
+        renderer.setPixelRatio(DPR);
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
+        camera.position.set(0, 0.35, 9.6);
+        camera.lookAt(0, 0.05, 0);
+        let camZ = 9.6;
+        const viewX = { left: -9, right: 9 };
+        function makeGlowTexture() {
+          const c = document.createElement("canvas");
+          c.width = c.height = 128;
+          const g = c.getContext("2d");
+          const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+          grd.addColorStop(0, "rgba(255,255,255,1)");
+          grd.addColorStop(0.22, "rgba(255,255,255,.85)");
+          grd.addColorStop(0.55, "rgba(255,255,255,.18)");
+          grd.addColorStop(1, "rgba(255,255,255,0)");
+          g.fillStyle = grd;
+          g.fillRect(0, 0, 128, 128);
+          const t = new THREE.CanvasTexture(c);
+          t.minFilter = THREE.LinearFilter;
+          return t;
+        }
+        function makeWordTexture(word2) {
+          const W = 2048,
+            H = 400;
+          const c = document.createElement("canvas");
+          c.width = W;
+          c.height = H;
+          const g = c.getContext("2d");
+          g.fillStyle = "#ffffff";
+          g.textBaseline = "middle";
+          const font = (px2) =>
+            `700 ${px2}px 'Inter','SF Pro Display',-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif`;
+          const measure = (px2, sp2) => {
+            g.font = font(px2);
+            let t2 = -sp2;
+            for (const ch of word2) t2 += g.measureText(ch).width + sp2;
+            return t2;
+          };
+          let px = 250,
+            sp = 70;
+          const total0 = measure(px, sp);
+          const fit = Math.min(1, (W - 120) / total0);
+          px *= fit;
+          sp *= fit;
+          let x = (W - measure(px, sp)) / 2;
+          for (const ch of word2) {
+            g.fillText(ch, x, H / 2 + 10 * fit);
+            x += g.measureText(ch).width + sp;
+          }
+          const t = new THREE.CanvasTexture(c);
+          t.minFilter = THREE.LinearFilter;
+          return { texture: t, aspect: H / W };
+        }
+        const glowTex = makeGlowTexture();
+        const word = makeWordTexture("BONSAI 27B");
+        const TP = { z: -5, cx: 0, cy: 0.15, hw: 8.6, hh: 8.6 * word.aspect };
+        const LOCAL_V = Array.from({ length: 3 }, (_, i) => {
+          const a = Math.PI / 2 + i * ((Math.PI * 2) / 3);
+          return { x: R * Math.cos(a), y: R * Math.sin(a) };
+        });
+        const shape = new THREE.Shape();
+        shape.moveTo(LOCAL_V[0].x, LOCAL_V[0].y);
+        shape.lineTo(LOCAL_V[1].x, LOCAL_V[1].y);
+        shape.lineTo(LOCAL_V[2].x, LOCAL_V[2].y);
+        shape.closePath();
+        const prismGeo = new THREE.ExtrudeGeometry(shape, {
+          depth: DEPTH,
+          bevelEnabled: false,
+        });
+        prismGeo.translate(0, 0, -DEPTH / 2);
+        const prism = new THREE.Group();
+        scene.add(prism);
+        const backMesh = new THREE.Mesh(
+          prismGeo,
+          new THREE.MeshBasicMaterial({
+            color: 658708,
+            transparent: true,
+            opacity: 0.5,
+            side: THREE.BackSide,
+            depthWrite: false,
+          }),
+        );
+        backMesh.renderOrder = 4;
+        prism.add(backMesh);
+        const glassMat = new THREE.ShaderMaterial({
+          transparent: true,
+          depthWrite: false,
+          side: THREE.FrontSide,
+          uniforms: {
+            uCam: { value: new THREE.Vector3() },
+            uTex: { value: word.texture },
+            uTime: { value: 0 },
+            uPlane: { value: new THREE.Vector4(TP.cx, TP.cy, TP.hw, TP.hh) },
+            uPlaneZ: { value: TP.z },
+          },
+          vertexShader: `
+      varying vec3 vN; varying vec3 vW;
+      void main(){
+        vN = normalize(mat3(modelMatrix) * normal);
+        vec4 w = modelMatrix * vec4(position, 1.0);
+        vW = w.xyz;
+        gl_Position = projectionMatrix * viewMatrix * w;
+      }`,
+          fragmentShader: `
+      uniform vec3 uCam; uniform sampler2D uTex; uniform float uTime;
+      uniform vec4 uPlane; uniform float uPlaneZ;
+      varying vec3 vN; varying vec3 vW;
+
+      // A dark-room gradient the glass can reflect and refract, so every
+      // face carries a soft vertical sheen even off the word plane.
+      vec3 room(vec3 d){
+        float h = clamp(d.y * 0.6 + 0.5, 0.0, 1.0);
+        return mix(vec3(0.010, 0.012, 0.020), vec3(0.075, 0.095, 0.150), h);
+      }
+
+      void main(){
+        vec3 N = normalize(vN);
+        vec3 V = normalize(vW - uCam);
+        float ndv  = abs(dot(N, -V));
+        float fres = pow(1.0 - ndv, 2.6);
+        vec3 col = vec3(0.016, 0.020, 0.034);
+
+        // Bend the view ray into the glass and sample the backdrop word
+        // where it lands, with a slight RGB split — chromatic aberration.
+        vec3 Rr = refract(V, N, 1.0 / 1.45);
+        col += room(Rr) * 0.55;
+        if (Rr.z < -0.001){
+          float tt = (uPlaneZ - vW.z) / Rr.z;
+          vec2 hit = vW.xy + Rr.xy * tt;
+          vec2 uv = vec2((hit.x - uPlane.x) / (2.0 * uPlane.z) + 0.5,
+                         (hit.y - uPlane.y) / (2.0 * uPlane.w) + 0.5);
+          if (uv.x > 0.0 && uv.x < 1.0 && uv.y > 0.0 && uv.y < 1.0){
+            vec2 ca = Rr.xy * 0.05;
+            float tr = texture2D(uTex, uv + ca).r;
+            float tg = texture2D(uTex, uv).g;
+            float tb = texture2D(uTex, uv - ca).b;
+            col += vec3(tr, tg, tb) * 0.5;
+          }
+        }
+
+        // Mirror sheen at grazing angles + a tight bright lip on the rim.
+        col += room(reflect(V, N)) * fres * 1.7;
+        col += vec3(0.60, 0.66, 0.80) * pow(1.0 - ndv, 6.0) * 0.38;
+
+        float sheen = 0.5 + 0.5 * sin(vW.x * 1.7 + vW.y * 2.3 + uTime * 0.6);
+        col += vec3(0.020, 0.025, 0.035) * sheen;
+        col += vec3(0.50, 0.56, 0.68) * fres * 0.35;
+        gl_FragColor = vec4(col, 0.74 + fres * 0.20);
+      }`,
+        });
+        const glassMesh = new THREE.Mesh(prismGeo, glassMat);
+        glassMesh.renderOrder = 5;
+        prism.add(glassMesh);
+        const edgeMat = new THREE.LineBasicMaterial({
+          color: 16777215,
+          transparent: true,
+          opacity: 0.5,
+          blending: THREE.AdditiveBlending,
+          depthTest: false,
+          depthWrite: false,
+        });
+        const edges = new THREE.LineSegments(
+          new THREE.EdgesGeometry(prismGeo),
+          edgeMat,
+        );
+        edges.renderOrder = 8;
+        prism.add(edges);
+        const BEAM_VERT = `
+    attribute vec3 aTangent;
+    attribute float aSide;
+    attribute float aT;
+    uniform float uWidth;
+    varying float vT; varying float vSide;
+    void main(){
+      vT = aT; vSide = aSide;
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      vec3 tv = (modelViewMatrix * vec4(position + aTangent, 1.0)).xyz - mv.xyz;
+      vec3 toCam = normalize(-mv.xyz);
+      vec3 sideDir = cross(normalize(tv), toCam);
+      float L = length(sideDir);
+      sideDir = (L > 0.0001) ? sideDir / L : vec3(0.0, 1.0, 0.0);
+      mv.xyz += sideDir * aSide * uWidth;
+      gl_Position = projectionMatrix * mv;
+    }`;
+        const BEAM_FRAG = `
+    uniform vec3 uColor;
+    uniform float uOpacity; uniform float uTime; uniform float uReveal;
+    uniform float uTailFade; uniform float uSeed;
+    varying float vT; varying float vSide;
+    void main(){
+      float s = vSide;
+      float core = exp(-s * s * 20.0);
+      float halo = exp(-s * s * 4.5) * 0.5;
+      float prof = core + halo;
+      float tail = mix(1.0, 0.16 + 0.84 * pow(1.0 - vT, 1.5), uTailFade);
+      float rev = clamp((uReveal - vT) / 0.12, 0.0, 1.0);
+      float shimmer = 0.9 + 0.1 * sin(vT * 30.0 - uTime * 4.5 + uSeed * 17.0);
+      float a = prof * tail * rev * shimmer * uOpacity;
+      gl_FragColor = vec4(uColor * (0.72 + 0.85 * core), a);
+    }`;
+        function makeBeam(
+          n,
+          hex,
+          { width = 0.05, opacity = 1, tailFade = 0, order = 6 } = {},
+        ) {
+          const geo = new THREE.BufferGeometry();
+          const pos = new Float32Array(n * 2 * 3);
+          const tan = new Float32Array(n * 2 * 3);
+          const side = new Float32Array(n * 2);
+          const tArr = new Float32Array(n * 2);
+          for (let i = 0; i < n; i++) {
+            side[2 * i] = 1;
+            side[2 * i + 1] = -1;
+            tArr[2 * i] = tArr[2 * i + 1] = i / (n - 1);
+          }
+          const idx = new Uint16Array((n - 1) * 6);
+          for (let i = 0; i < n - 1; i++) {
+            const o = i * 6,
+              v = i * 2;
+            idx[o] = v;
+            idx[o + 1] = v + 1;
+            idx[o + 2] = v + 2;
+            idx[o + 3] = v + 1;
+            idx[o + 4] = v + 3;
+            idx[o + 5] = v + 2;
+          }
+          geo.setIndex(new THREE.BufferAttribute(idx, 1));
+          const posAttr = new THREE.BufferAttribute(pos, 3).setUsage(
+            THREE.DynamicDrawUsage,
+          );
+          const tanAttr = new THREE.BufferAttribute(tan, 3).setUsage(
+            THREE.DynamicDrawUsage,
+          );
+          geo.setAttribute("position", posAttr);
+          geo.setAttribute("aTangent", tanAttr);
+          geo.setAttribute("aSide", new THREE.BufferAttribute(side, 1));
+          geo.setAttribute("aT", new THREE.BufferAttribute(tArr, 1));
+          const mat = new THREE.ShaderMaterial({
+            transparent: true,
+            depthWrite: false,
+            depthTest: false,
+            blending: THREE.AdditiveBlending,
+            side: THREE.DoubleSide,
+            uniforms: {
+              uColor: { value: new THREE.Color(hex) },
+              uWidth: { value: width },
+              uOpacity: { value: opacity },
+              uTime: { value: 0 },
+              uReveal: { value: 0 },
+              uTailFade: { value: tailFade },
+              uSeed: { value: Math.random() * 10 },
+            },
+            vertexShader: BEAM_VERT,
+            fragmentShader: BEAM_FRAG,
+          });
+          const mesh = new THREE.Mesh(geo, mat);
+          mesh.frustumCulled = false;
+          mesh.renderOrder = order;
+          scene.add(mesh);
+          const update = (pts) => {
+            for (let k = 0; k < n; k++) {
+              const p = pts[k];
+              const a = pts[k > 0 ? k - 1 : 0];
+              const b = pts[k < n - 1 ? k + 1 : n - 1];
+              let tx = b.x - a.x,
+                ty = b.y - a.y,
+                tz = b.z - a.z;
+              const L = Math.sqrt(tx * tx + ty * ty + tz * tz) || 1;
+              tx /= L;
+              ty /= L;
+              tz /= L;
+              const o = k * 6;
+              pos[o] = p.x;
+              pos[o + 1] = p.y;
+              pos[o + 2] = p.z;
+              pos[o + 3] = p.x;
+              pos[o + 4] = p.y;
+              pos[o + 5] = p.z;
+              tan[o] = tx;
+              tan[o + 1] = ty;
+              tan[o + 2] = tz;
+              tan[o + 3] = tx;
+              tan[o + 4] = ty;
+              tan[o + 5] = tz;
+            }
+            posAttr.needsUpdate = true;
+            tanAttr.needsUpdate = true;
+          };
+          return { mat, update };
+        }
+        const vecArray = (n) =>
+          Array.from({ length: n }, () => new THREE.Vector3());
+        const INC_N = 56,
+          REF_N = 16,
+          RES_N = 24;
+        const INC_PTS = vecArray(INC_N);
+        const REF_PTS = vecArray(REF_N);
+        const RES_PTS = vecArray(RES_N);
+        const incoming = makeBeam(INC_N, 16777215, {
+          width: 0.06,
+          opacity: 0.95,
+        });
+        const reflectBeam = makeBeam(REF_N, 16777215, {
+          width: 0.04,
+          opacity: 0.09,
+          tailFade: 1,
+        });
+        const residualBeam = makeBeam(RES_N, 16777215, {
+          width: 0.045,
+          opacity: 0.1,
+          tailFade: 1,
+        });
+        const allBeams = [incoming, reflectBeam, residualBeam];
+        const SHEET_VERT = `
+    attribute float aW;      // spectral coordinate across the fan
+    attribute float aT;      // parameter along the path
+    attribute float aAlpha;  // per-column validity (eases out on TIR)
+    attribute float aRev;    // per-column propagation front
+    attribute vec3  aColor;  // spectral RGB
+    varying float vW; varying float vT; varying float vA; varying float vRev;
+    varying vec3 vCol;
+    void main(){
+      vW = aW; vT = aT; vA = aAlpha; vRev = aRev; vCol = aColor;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }`;
+        const SHEET_FRAG = `
+    uniform float uTime; uniform float uOpacity;
+    uniform float uHeadWhite; uniform float uHeadK;
+    uniform float uAlongBase; uniform float uAlongK;
+    varying float vW; varying float vT; varying float vA; varying float vRev;
+    varying vec3 vCol;
+    float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    void main(){
+      float edge  = smoothstep(0.0, 0.05, vW) * smoothstep(1.0, 0.95, vW);
+      float along = uAlongBase + (1.0 - uAlongBase) * exp(-vT * uAlongK);
+      along *= 1.0 - smoothstep(0.90, 1.0, vT);
+      float rev = clamp((vRev - vT) / 0.10, 0.0, 1.0);
+      float grain = 0.88 + 0.24 * hash(vec2(vT * 211.0 + vW * 97.0, floor(uTime * 24.0)));
+      vec3 col = mix(vCol, vec3(1.0), uHeadWhite * exp(-vT * uHeadK));
+      gl_FragColor = vec4(col, edge * along * rev * vA * grain * uOpacity);
+    }`;
+        function makeSheet(
+          cols,
+          rows,
+          { opacity, headWhite, headK, alongBase, alongK, order = 6 },
+        ) {
+          const count = cols * rows;
+          const geo = new THREE.BufferGeometry();
+          const pos = new Float32Array(count * 3);
+          const aW = new Float32Array(count);
+          const aT = new Float32Array(count);
+          const aA = new Float32Array(count);
+          const aRev = new Float32Array(count);
+          const aCol = new Float32Array(count * 3);
+          for (let k = 0; k < rows; k++) {
+            for (let c = 0; c < cols; c++) {
+              const i = k * cols + c,
+                w = c / (cols - 1);
+              aW[i] = w;
+              aT[i] = k / (rows - 1);
+              const rgb = specColor(w);
+              aCol[i * 3] = rgb[0];
+              aCol[i * 3 + 1] = rgb[1];
+              aCol[i * 3 + 2] = rgb[2];
+            }
+          }
+          const idx = new Uint16Array((cols - 1) * (rows - 1) * 6);
+          let o = 0;
+          for (let k = 0; k < rows - 1; k++) {
+            for (let c = 0; c < cols - 1; c++) {
+              const v = k * cols + c;
+              idx[o++] = v;
+              idx[o++] = v + 1;
+              idx[o++] = v + cols;
+              idx[o++] = v + 1;
+              idx[o++] = v + cols + 1;
+              idx[o++] = v + cols;
+            }
+          }
+          geo.setIndex(new THREE.BufferAttribute(idx, 1));
+          const posAttr = new THREE.BufferAttribute(pos, 3).setUsage(
+            THREE.DynamicDrawUsage,
+          );
+          const aAttr = new THREE.BufferAttribute(aA, 1).setUsage(
+            THREE.DynamicDrawUsage,
+          );
+          const revAttr = new THREE.BufferAttribute(aRev, 1).setUsage(
+            THREE.DynamicDrawUsage,
+          );
+          geo.setAttribute("position", posAttr);
+          geo.setAttribute("aAlpha", aAttr);
+          geo.setAttribute("aRev", revAttr);
+          geo.setAttribute("aW", new THREE.BufferAttribute(aW, 1));
+          geo.setAttribute("aT", new THREE.BufferAttribute(aT, 1));
+          geo.setAttribute("aColor", new THREE.BufferAttribute(aCol, 3));
+          const mat = new THREE.ShaderMaterial({
+            transparent: true,
+            depthWrite: false,
+            depthTest: false,
+            blending: THREE.AdditiveBlending,
+            side: THREE.DoubleSide,
+            uniforms: {
+              uTime: { value: 0 },
+              uOpacity: { value: opacity },
+              uHeadWhite: { value: headWhite },
+              uHeadK: { value: headK },
+              uAlongBase: { value: alongBase },
+              uAlongK: { value: alongK },
+            },
+            vertexShader: SHEET_VERT,
+            fragmentShader: SHEET_FRAG,
+          });
+          const mesh = new THREE.Mesh(geo, mat);
+          mesh.frustumCulled = false;
+          mesh.renderOrder = order;
+          scene.add(mesh);
+          const setPoint = (k, c, x, y, z) => {
+            const i = (k * cols + c) * 3;
+            pos[i] = x;
+            pos[i + 1] = y;
+            pos[i + 2] = z;
+          };
+          const setColumnScalar = (arr, c, v) => {
+            for (let k = 0; k < rows; k++) arr[k * cols + c] = v;
+          };
+          return {
+            mat,
+            cols,
+            rows,
+            pos,
+            setPoint,
+            setAlpha: (c, v) => setColumnScalar(aA, c, v),
+            setRev: (c, v) => setColumnScalar(aRev, c, v),
+            commit() {
+              posAttr.needsUpdate =
+                aAttr.needsUpdate =
+                revAttr.needsUpdate =
+                  true;
+            },
+          };
+        }
+        function sampleSheet(sheet, c, u, out) {
+          const f = clamp012(u) * (sheet.rows - 1);
+          const k = Math.min(sheet.rows - 2, Math.floor(f));
+          const m = f - k;
+          const i0 = (k * sheet.cols + c) * 3,
+            i1 = ((k + 1) * sheet.cols + c) * 3;
+          const p = sheet.pos;
+          out.set(
+            p[i0] + (p[i1] - p[i0]) * m,
+            p[i0 + 1] + (p[i1 + 1] - p[i0 + 1]) * m,
+            p[i0 + 2] + (p[i1 + 2] - p[i0 + 2]) * m,
+          );
+        }
+        const exitSheet = makeSheet(NC, NK, {
+          opacity: 0.92,
+          headWhite: 0.55,
+          headK: 5.5,
+          alongBase: 0.34,
+          alongK: 1.5,
+        });
+        const innerSheet = makeSheet(NC, NKI, {
+          opacity: 0.3,
+          headWhite: 0.65,
+          headK: 4,
+          alongBase: 0.55,
+          alongK: 0.9,
+        });
+        const TRI = [
+          { x: 0, y: 0 },
+          { x: 0, y: 0 },
+          { x: 0, y: 0 },
+        ];
+        const TRI_C = { x: 0, y: 0 };
+        function updateTri(rotZ, bob) {
+          const c = Math.cos(rotZ),
+            s = Math.sin(rotZ);
+          for (let i = 0; i < 3; i++) {
+            const v = LOCAL_V[i];
+            TRI[i].x = v.x * c - v.y * s;
+            TRI[i].y = v.x * s + v.y * c + bob;
+          }
+          TRI_C.x = (TRI[0].x + TRI[1].x + TRI[2].x) / 3;
+          TRI_C.y = (TRI[0].y + TRI[1].y + TRI[2].y) / 3;
+        }
+        const cross2 = (ax, ay, bx, by) => ax * by - ay * bx;
+        function castRay(px, py, dx, dy, skip, out) {
+          let best = Infinity,
+            be = -1,
+            bx = 0,
+            by = 0,
+            bnx = 0,
+            bny = 0;
+          for (let i = 0; i < 3; i++) {
+            if (i === skip) continue;
+            const a = TRI[i],
+              b = TRI[(i + 1) % 3];
+            const ex = b.x - a.x,
+              ey = b.y - a.y;
+            const den = cross2(dx, dy, ex, ey);
+            if (Math.abs(den) < 1e-9) continue;
+            const wx = a.x - px,
+              wy = a.y - py;
+            const t = cross2(wx, wy, ex, ey) / den;
+            const s = cross2(wx, wy, dx, dy) / den;
+            if (t > 1e-4 && s >= -1e-4 && s <= 1.0001 && t < best) {
+              best = t;
+              be = i;
+              bx = px + dx * t;
+              by = py + dy * t;
+              let nx = ey,
+                ny = -ex;
+              const L = Math.sqrt(nx * nx + ny * ny) || 1;
+              nx /= L;
+              ny /= L;
+              const mx = (a.x + b.x) / 2,
+                my = (a.y + b.y) / 2;
+              if (nx * (mx - TRI_C.x) + ny * (my - TRI_C.y) < 0) {
+                nx = -nx;
+                ny = -ny;
+              }
+              bnx = nx;
+              bny = ny;
+            }
+          }
+          if (be < 0) return false;
+          out.t = best;
+          out.x = bx;
+          out.y = by;
+          out.nx = bnx;
+          out.ny = bny;
+          out.edge = be;
+          return true;
+        }
+        function refract2(ix, iy, nx, ny, eta, out) {
+          let d = ix * nx + iy * ny;
+          if (d > 0) {
+            nx = -nx;
+            ny = -ny;
+            d = -d;
+          }
+          const cosi = -d;
+          const k = 1 - eta * eta * (1 - cosi * cosi);
+          if (k < 0) return false;
+          const f = eta * cosi - Math.sqrt(k);
+          out.x = eta * ix + f * nx;
+          out.y = eta * iy + f * ny;
+          return true;
+        }
+        function reflect2(ix, iy, nx, ny, out) {
+          const d = ix * nx + iy * ny;
+          out.x = ix - 2 * d * nx;
+          out.y = iy - 2 * d * ny;
+        }
+        const MAX_TRACE_PTS = 5;
+        const makeTraceRec = () => ({
+          pts: Array.from({ length: MAX_TRACE_PTS }, () => ({ x: 0, y: 0 })),
+          count: 0,
+          ex: 0,
+          ey: 0,
+          dx: 0,
+          dy: 0,
+          len: 0,
+          valid: false,
+        });
+        const TRACES = Array.from({ length: NC }, makeTraceRec);
+        const CTRACE = makeTraceRec();
+        const ENTRY = { valid: false, x: 0, y: 0, nx: 0, ny: 0, edge: -1 };
+        const HIT_E = { t: 0, x: 0, y: 0, nx: 0, ny: 0, edge: -1 };
+        const HIT_I = { t: 0, x: 0, y: 0, nx: 0, ny: 0, edge: -1 };
+        const TDIR = { x: 0, y: 0 };
+        function trace(n, rec) {
+          rec.count = 0;
+          rec.valid = false;
+          if (!ENTRY.valid) return;
+          if (!refract2(RAY.dx, RAY.dy, ENTRY.nx, ENTRY.ny, 1 / n, TDIR))
+            return;
+          rec.pts[0].x = ENTRY.x;
+          rec.pts[0].y = ENTRY.y;
+          rec.count = 1;
+          let cx = ENTRY.x,
+            cy = ENTRY.y,
+            dx = TDIR.x,
+            dy = TDIR.y,
+            skip = ENTRY.edge;
+          let len = 0;
+          for (let b = 0; b < 3; b++) {
+            if (!castRay(cx, cy, dx, dy, skip, HIT_I)) return;
+            len += HIT_I.t;
+            rec.pts[rec.count].x = HIT_I.x;
+            rec.pts[rec.count].y = HIT_I.y;
+            rec.count++;
+            if (refract2(dx, dy, HIT_I.nx, HIT_I.ny, n, TDIR)) {
+              rec.ex = HIT_I.x;
+              rec.ey = HIT_I.y;
+              rec.dx = TDIR.x;
+              rec.dy = TDIR.y;
+              rec.len = len;
+              rec.valid = true;
+              return;
+            }
+            reflect2(dx, dy, HIT_I.nx, HIT_I.ny, TDIR);
+            dx = TDIR.x;
+            dy = TDIR.y;
+            cx = HIT_I.x;
+            cy = HIT_I.y;
+            skip = HIT_I.edge;
+          }
+        }
+        const SEGL = new Float64Array(MAX_TRACE_PTS);
+        function writeInnerColumn(rec, c, zOff) {
+          const rows = innerSheet.rows,
+            cnt = rec.count;
+          if (cnt < 2) return;
+          let total = 0;
+          for (let i = 1; i < cnt; i++) {
+            const dx = rec.pts[i].x - rec.pts[i - 1].x;
+            const dy = rec.pts[i].y - rec.pts[i - 1].y;
+            SEGL[i] = Math.sqrt(dx * dx + dy * dy);
+            total += SEGL[i];
+          }
+          if (total < 1e-6) return;
+          let seg = 1,
+            acc = 0;
+          for (let k = 0; k < rows; k++) {
+            const target = (total * k) / (rows - 1);
+            while (seg < cnt - 1 && acc + SEGL[seg] < target) {
+              acc += SEGL[seg];
+              seg++;
+            }
+            const u = SEGL[seg] > 1e-9 ? (target - acc) / SEGL[seg] : 0;
+            const a = rec.pts[seg - 1],
+              b = rec.pts[seg];
+            innerSheet.setPoint(
+              k,
+              c,
+              a.x + (b.x - a.x) * u,
+              a.y + (b.y - a.y) * u,
+              zOff,
+            );
+          }
+        }
+        function writeExitColumn(c, w, ex, ey, ang0, tA, zOff) {
+          const rows = exitSheet.rows,
+            step = EXIT_LEN / (rows - 1);
+          const angT = ang0 * (1 - 0.55 * clamp012(Math.cos(ang0)));
+          let x = ex,
+            y = ey;
+          for (let k = 0; k < rows; k++) {
+            const u = k / (rows - 1);
+            const e = hermite(u) * 0.9;
+            const ang = ang0 + (angT - ang0) * e;
+            if (k > 0) {
+              x += Math.cos(ang) * step;
+              y += Math.sin(ang) * step;
+            }
+            const sway = Math.sin(tA * 0.8 + w * 5.4 + u * 2.4) * 0.14 * u;
+            exitSheet.setPoint(
+              k,
+              c,
+              x - Math.sin(ang) * sway,
+              y + Math.cos(ang) * sway,
+              zOff,
+            );
+          }
+        }
+        function buildIncoming(tA, hasEntry) {
+          const x0 = viewX.left - 0.5;
+          const y0 = RAY.py + (x0 - RAY.px) * SLOPE;
+          let x1, y1;
+          if (hasEntry) {
+            x1 = ENTRY.x;
+            y1 = ENTRY.y;
+          } else {
+            x1 = viewX.right + 1;
+            y1 = RAY.py + (x1 - RAY.px) * SLOPE;
+          }
+          for (let k = 0; k < INC_N; k++) {
+            const u = k / (INC_N - 1);
+            const x = x0 + (x1 - x0) * u;
+            let y = y0 + (y1 - y0) * u;
+            const envL = sstep(0.02, 0.18, u);
+            const envR = hasEntry
+              ? hermite(clamp012((x1 - x) / 3))
+              : sstep(0.02, 0.18, 1 - u);
+            y += Math.sin((x - CV * tA) * 0.65) * 0.05 * envL * envR;
+            INC_PTS[k].set(x, y, 0);
+          }
+          if (hasEntry) INC_PTS[INC_N - 1].set(ENTRY.x, ENTRY.y, 0);
+        }
+        function buildReflect() {
+          reflect2(RAY.dx, RAY.dy, ENTRY.nx, ENTRY.ny, TDIR);
+          const L = 6;
+          for (let k = 0; k < REF_N; k++) {
+            const u = k / (REF_N - 1);
+            REF_PTS[k].set(
+              ENTRY.x + TDIR.x * L * u,
+              ENTRY.y + TDIR.y * L * u,
+              0,
+            );
+          }
+        }
+        function buildResidual() {
+          const L = 12;
+          for (let k = 0; k < RES_N; k++) {
+            const u = k / (RES_N - 1);
+            RES_PTS[k].set(
+              ENTRY.x + RAY.dx * L * u,
+              ENTRY.y + RAY.dy * L * u,
+              0.01,
+            );
+          }
+        }
+        function makeSprite(hex, scale, opacity, order) {
+          const s = new THREE.Sprite(
+            new THREE.SpriteMaterial({
+              map: glowTex,
+              color: hex,
+              transparent: true,
+              opacity,
+              blending: THREE.AdditiveBlending,
+              depthTest: false,
+              depthWrite: false,
+            }),
+          );
+          s.scale.setScalar(scale);
+          s.renderOrder = order;
+          scene.add(s);
+          return s;
+        }
+        const apexDot = makeSprite(16777215, 0.12, 0.9, 9);
+        const sourceDot = makeSprite(16777215, 0.17, 0.95, 9);
+        const entryGlow = makeSprite(14542591, 0.3, 0, 9);
+        const exitGlow = makeSprite(16777215, 0.5, 0, 9);
+        const cornerDots = [1, 2].map(() => makeSprite(16777215, 0.085, 0, 9));
+        const pulseHex = (w) => new THREE.Color(...specColor(w)).getHex();
+        const NP = 5,
+          T_EMIT = 2.2,
+          CYCLE = NP * T_EMIT;
+        const whitePulses = Array.from({ length: NP }, () =>
+          makeSprite(16777215, 0.085, 0, 9),
+        );
+        const colorPulses = PULSE_W.map((w) => {
+          const hex = pulseHex(w);
+          return Array.from({ length: NP }, () => makeSprite(hex, 0.075, 0, 9));
+        });
+        const PULSE_COL = PULSE_W.map((w) => Math.round(w * (NC - 1)));
+        const washes = PULSE_W.map((w) => makeSprite(pulseHex(w), 5.5, 0, 2));
+        const SAMP = new THREE.Vector3();
+        function samplePts(pts, u, out) {
+          const f = clamp012(u) * (pts.length - 1);
+          const i = Math.min(pts.length - 2, Math.floor(f));
+          out.copy(pts[i]).lerp(pts[i + 1], f - i);
+        }
+        const APEX_LOCAL = new THREE.Vector3(0, R, DEPTH / 2 + 0.02);
+        const CORNER_LOCAL = LOCAL_V.slice(1).map(
+          (v) => new THREE.Vector3(v.x, v.y, DEPTH / 2 + 0.02),
+        );
+        const APEX_W = new THREE.Vector3();
+        let dragging = false,
+          lastPX = 0,
+          lastPY = 0;
+        let userX = 0,
+          userY = 0,
+          userZ = 0;
+        let velX = 0,
+          velY = 0,
+          velZ = 0;
+        let velTrail = [];
+        let autoAmp = 1,
+          lastInteract = -10;
+        let mouseNX = 0,
+          mouseNY = 0;
+        let parX = 0,
+          parY = 0,
+          parTX = 0,
+          parTY = 0;
+        let tGlobal = 0;
+        canvas.addEventListener("pointerdown", (e) => {
+          dragging = true;
+          velX = velY = velZ = 0;
+          velTrail = [{ t: performance.now(), x: userX, y: userY, z: userZ }];
+          lastPX = e.clientX;
+          lastPY = e.clientY;
+          lastInteract = tGlobal;
+          document.body.classList.add("grabbing");
+          try {
+            canvas.setPointerCapture(e.pointerId);
+          } catch (err) {}
+        });
+        window.addEventListener("pointermove", (e) => {
+          if (!App.landingActive) return;
+          mouseNX = (e.clientX / window.innerWidth) * 2 - 1;
+          mouseNY = (e.clientY / window.innerHeight) * 2 - 1;
+          if (!dragging) return;
+          const dx = e.clientX - lastPX,
+            dy = e.clientY - lastPY;
+          lastPX = e.clientX;
+          lastPY = e.clientY;
+          userZ += dx * 0.006;
+          userY = clamp(userY + dx * 0.0028, -0.5, 0.5);
+          userX = clamp(userX + dy * 0.0035, -0.3, 0.3);
+          const nowMs = performance.now();
+          velTrail.push({ t: nowMs, x: userX, y: userY, z: userZ });
+          while (velTrail.length > 2 && nowMs - velTrail[0].t > 120)
+            velTrail.shift();
+          lastInteract = tGlobal;
+        });
+        function endDrag() {
+          if (!dragging) return;
+          dragging = false;
+          if (velTrail.length > 1) {
+            const a = velTrail[0],
+              b = velTrail[velTrail.length - 1];
+            const wdt = Math.max((b.t - a.t) / 1e3, 1 / 240);
+            velZ = clamp((b.z - a.z) / wdt, -6, 6);
+            velY = clamp((b.y - a.y) / wdt, -2, 2);
+            velX = clamp((b.x - a.x) / wdt, -2, 2);
+          }
+          velTrail = [];
+          lastInteract = tGlobal;
+          document.body.classList.remove("grabbing");
+        }
+        window.addEventListener("pointerup", endDrag);
+        window.addEventListener("pointercancel", endDrag);
+        function onResize() {
+          const w = window.innerWidth,
+            h = window.innerHeight;
+          renderer.setSize(w, h);
+          const aspect = w / h;
+          camera.aspect = aspect;
+          camZ = Math.min(9.6 / Math.min(1, aspect / 1.15), 15.5);
+          camera.updateProjectionMatrix();
+          const halfH =
+            Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camZ;
+          viewX.right = halfH * aspect + 1.2;
+          viewX.left = -viewX.right;
+        }
+        window.addEventListener("resize", onResize);
+        onResize();
+        const colAlpha = new Float32Array(NC);
+        let entryAlpha = 0;
+        let trapGlow = 0;
+        let lastAC = -0.06;
+        const T_OUT = new Float32Array(NC);
+        function castEntry() {
+          const sx = viewX.left - 2;
+          const sy = RAY.py + (sx - RAY.px) * SLOPE;
+          const hit =
+            castRay(sx, sy, RAY.dx, RAY.dy, -1, HIT_E) &&
+            HIT_E.nx * RAY.dx + HIT_E.ny * RAY.dy < -0.001;
+          ENTRY.valid = hit;
+          if (hit) {
+            ENTRY.x = HIT_E.x;
+            ENTRY.y = HIT_E.y;
+            ENTRY.nx = HIT_E.nx;
+            ENTRY.ny = HIT_E.ny;
+            ENTRY.edge = HIT_E.edge;
+          }
+          return hit;
+        }
+        function centerAngle() {
+          let aC;
+          if (CTRACE.valid) {
+            aC = Math.atan2(CTRACE.dy, CTRACE.dx);
+          } else {
+            let sum = 0,
+              cnt = 0;
+            for (const rec of TRACES) {
+              if (rec.valid) {
+                sum += Math.atan2(rec.dy, rec.dx);
+                cnt++;
+              }
+            }
+            aC = cnt > 0 ? sum / cnt : lastAC;
+          }
+          lastAC = aC;
+          return aC;
+        }
+        function updatePulses(tP, dIn, airT, lamp, hasEntry) {
+          for (let s = 0; s < NP; s++) {
+            const emit = s * T_EMIT;
+            const live = tP >= emit;
+            const age = live ? (tP - emit) % CYCLE : 0;
+            const dAir = age * CV;
+            const wSpr = whitePulses[s];
+            if (live && dAir < dIn) {
+              samplePts(INC_PTS, dAir / dIn, SAMP);
+              wSpr.position.copy(SAMP);
+              wSpr.material.opacity = 0.85 * lamp;
+            } else wSpr.material.opacity = 0;
+            for (let i = 0; i < 6; i++) {
+              const spr = colorPulses[i][s];
+              const c = PULSE_COL[i];
+              if (
+                !live ||
+                !hasEntry ||
+                colAlpha[c] < 0.05 ||
+                TRACES[c].len < 1e-6 ||
+                age <= airT
+              ) {
+                spr.material.opacity = 0;
+                continue;
+              }
+              const tOut = T_OUT[c];
+              if (age < tOut) {
+                const u = ((age - airT) * (CV / N_COL[c])) / TRACES[c].len;
+                sampleSheet(innerSheet, c, u, SAMP);
+                spr.position.copy(SAMP);
+                spr.material.opacity = 0.9 * colAlpha[c];
+              } else if (age < tOut + EXIT_LEN / CV) {
+                sampleSheet(exitSheet, c, ((age - tOut) * CV) / EXIT_LEN, SAMP);
+                spr.position.copy(SAMP);
+                spr.material.opacity = 0.85 * colAlpha[c];
+              } else spr.material.opacity = 0;
+            }
+          }
+        }
+        function updateOptics(tA, dt, rotZ, bob) {
+          updateTri(rotZ, bob);
+          const hasEntry = castEntry();
+          const ease = 1 - Math.exp(-6 * dt);
+          entryAlpha += ((hasEntry ? 1 : 0) - entryAlpha) * ease;
+          const tP = Math.max(0, tA - T0);
+          const lamp = clamp012(tP / 0.3);
+          buildIncoming(tA, hasEntry);
+          incoming.update(INC_PTS);
+          const x0 = viewX.left - 0.5;
+          const dIn = hasEntry
+            ? Math.hypot(
+                ENTRY.x - x0,
+                ENTRY.y - (RAY.py + (x0 - RAY.px) * SLOPE),
+              )
+            : (viewX.right + 1 - x0) / RAY.dx;
+          const airT = dIn / CV;
+          const sinceEntry = Math.max(0, tP - airT);
+          incoming.mat.uniforms.uReveal.value = clamp012((CV * tP) / dIn);
+          if (hasEntry) {
+            buildReflect();
+            reflectBeam.update(REF_PTS);
+            buildResidual();
+            residualBeam.update(RES_PTS);
+          }
+          const pastEntry = sinceEntry * CV;
+          reflectBeam.mat.uniforms.uOpacity.value = 0.09 * entryAlpha;
+          residualBeam.mat.uniforms.uOpacity.value = 0.1 * entryAlpha;
+          reflectBeam.mat.uniforms.uReveal.value = clamp012(pastEntry / 6);
+          residualBeam.mat.uniforms.uReveal.value = clamp012(pastEntry / 12);
+          trace(N_CENTER, CTRACE);
+          for (let c = 0; c < NC; c++) trace(N_COL[c], TRACES[c]);
+          const aC = centerAngle();
+          let gx = 0,
+            gy = 0,
+            ga = 0,
+            alive = 0,
+            tFirstOut = Infinity;
+          for (let c = 0; c < NC; c++) {
+            const rec = TRACES[c];
+            const w = c / (NC - 1);
+            colAlpha[c] +=
+              ((hasEntry && rec.valid ? 1 : 0) - colAlpha[c]) * ease;
+            const zOff = (w - 0.5) * 0.3;
+            if (rec.valid) {
+              alive++;
+              const ai = Math.atan2(rec.dy, rec.dx);
+              writeExitColumn(
+                c,
+                w,
+                rec.ex,
+                rec.ey,
+                aC + wrapPI(ai - aC) * SPREAD,
+                tA,
+                zOff,
+              );
+              writeInnerColumn(rec, c, zOff);
+              T_OUT[c] = airT + (rec.len * N_COL[c]) / CV;
+            }
+            const glassRev =
+              rec.len > 1e-6
+                ? clamp012((sinceEntry * (CV / N_COL[c])) / rec.len)
+                : 0;
+            innerSheet.setAlpha(c, colAlpha[c]);
+            innerSheet.setRev(c, glassRev);
+            exitSheet.setAlpha(c, colAlpha[c]);
+            exitSheet.setRev(
+              c,
+              clamp012((Math.max(0, tP - T_OUT[c]) * CV) / EXIT_LEN),
+            );
+            if (rec.valid || colAlpha[c] > 0.05) {
+              gx += rec.ex * colAlpha[c];
+              gy += rec.ey * colAlpha[c];
+              ga += colAlpha[c];
+              if (rec.valid && T_OUT[c] < tFirstOut) tFirstOut = T_OUT[c];
+            }
+          }
+          exitSheet.commit();
+          innerSheet.commit();
+          const trapT = hasEntry ? (1 - alive / NC) * 0.85 : 0;
+          trapGlow += (trapT - trapGlow) * (1 - Math.exp(-3 * dt));
+          innerSheet.mat.uniforms.uOpacity.value = 0.3 * (1 + trapGlow * 1.6);
+          for (let i = 0; i < 6; i++) {
+            const c = PULSE_COL[i];
+            sampleSheet(exitSheet, c, 0.38, SAMP);
+            washes[i].position.set(SAMP.x, SAMP.y, -2);
+            washes[i].material.opacity =
+              0.05 *
+              colAlpha[c] *
+              clamp012((Math.max(0, tP - T_OUT[c]) * CV) / 5);
+          }
+          updatePulses(tP, dIn, airT, lamp, hasEntry);
+          const exitFront = clamp012((Math.max(0, tP - tFirstOut) * CV) / 1.5);
+          if (ga > 0.05) exitGlow.position.set(gx / ga, gy / ga, 0.05);
+          exitGlow.scale.setScalar(0.5 * (1 + 0.12 * Math.sin(tA * 3)));
+          exitGlow.material.opacity =
+            0.9 * clamp012(ga / (NC * 0.5)) * exitFront;
+          if (hasEntry) entryGlow.position.set(ENTRY.x, ENTRY.y, 0.05);
+          entryGlow.material.opacity =
+            0.7 * entryAlpha * clamp012(pastEntry / 0.7);
+          samplePts(INC_PTS, 0.03, SAMP);
+          sourceDot.position.copy(SAMP);
+          sourceDot.scale.setScalar(0.17 + 0.02 * Math.sin(tA * 2.1));
+          sourceDot.material.opacity = 0.95 * lamp;
+          incoming.mat.uniforms.uOpacity.value =
+            0.95 *
+            lamp *
+            (0.97 + 0.02 * Math.sin(tA * 9.1) + 0.015 * Math.sin(tA * 3.7));
+          for (const b of allBeams) b.mat.uniforms.uTime.value = tA;
+          exitSheet.mat.uniforms.uTime.value = tA;
+          innerSheet.mat.uniforms.uTime.value = tA;
+          return lamp;
+        }
+        const clock = new THREE.Clock();
+        const THIRD = (Math.PI * 2) / 3;
+        let ready = false;
+        let spectrumSeen = false;
+        function animate() {
+          if (!App.landingActive) return;
+          requestAnimationFrame(animate);
+          const dt = Math.min(clock.getDelta(), 0.05);
+          tGlobal += dt;
+          const tA = tGlobal * SPD;
+          if (!dragging && (velZ || velY || velX)) {
+            userZ += velZ * dt;
+            userY = clamp(userY + velY * dt, -0.5, 0.5);
+            userX = clamp(userX + velX * dt, -0.3, 0.3);
+            velZ *= Math.exp(-dt * 1.5);
+            velY *= Math.exp(-dt * 3.5);
+            velX *= Math.exp(-dt * 3.5);
+            if (Math.abs(velZ) > 0.05) lastInteract = tGlobal;
+            else {
+              if (Math.abs(velZ) < 0.03) velZ = 0;
+              if (Math.abs(velY) < 0.02) velY = 0;
+              if (Math.abs(velX) < 0.02) velX = 0;
+            }
+          }
+          const idle = tGlobal - lastInteract;
+          const ampTarget = dragging ? 0 : idle > 1.6 ? 1 : 0;
+          autoAmp += (ampTarget - autoAmp) * (1 - Math.exp(-dt * 1.4));
+          if (!dragging && idle > 1.6) {
+            const dec = Math.exp(-dt * 0.22);
+            userX *= dec;
+            userY *= dec;
+            const home = Math.round(userZ / THIRD) * THIRD;
+            userZ = home + (userZ - home) * dec;
+          }
+          const amp = autoAmp;
+          const rotZ =
+            (Math.sin(tA * 0.31) * 0.15 + Math.sin(tA * 0.127) * 0.06) * amp +
+            userZ;
+          const rotY = Math.sin(tA * 0.21) * 0.32 * amp + userY;
+          const rotX = (Math.sin(tA * 0.165) * 0.09 + 0.02) * amp + userX;
+          const bob = Math.sin(tA * 0.5) * 0.055 * amp;
+          prism.rotation.set(rotX, rotY, rotZ);
+          prism.position.y = bob;
+          prism.updateMatrixWorld();
+          const lamp = updateOptics(tA, dt, rotZ, bob);
+          if (!spectrumSeen && exitGlow.material.opacity > 0.03) {
+            spectrumSeen = true;
+            document.body.classList.add("spectrum");
+          }
+          APEX_W.copy(APEX_LOCAL).applyMatrix4(prism.matrixWorld);
+          apexDot.position.copy(APEX_W);
+          apexDot.material.opacity = 0.9 * lamp;
+          for (let i = 0; i < 2; i++) {
+            APEX_W.copy(CORNER_LOCAL[i]).applyMatrix4(prism.matrixWorld);
+            cornerDots[i].position.copy(APEX_W);
+            cornerDots[i].material.opacity =
+              lamp * (0.35 + 0.25 * Math.sin(tA * 2 + i * 2.1));
+          }
+          glassMat.uniforms.uTime.value = tA;
+          glassMat.uniforms.uCam.value.copy(camera.position);
+          edgeMat.opacity = 0.45 + 0.08 * Math.sin(tA * 1.3) + trapGlow * 0.3;
+          if (!dragging) {
+            parTX = mouseNX * 0.38;
+            parTY = -mouseNY * 0.22;
+          }
+          const pe = 1 - Math.exp(-dt * 3);
+          parX += (parTX - parX) * pe;
+          parY += (parTY - parY) * pe;
+          camera.position.set(
+            parX + Math.sin(tA * 0.13) * 0.15,
+            0.35 + parY + Math.cos(tA * 0.1) * 0.08,
+            camZ,
+          );
+          camera.lookAt(0, 0.05, 0);
+          renderer.render(scene, camera);
+          if (!ready) {
+            ready = true;
+            document.body.classList.add("ready");
+            setTimeout(() => document.body.classList.add("spectrum"), 7e3);
+          }
+        }
+        animate();
+        App._disposeLanding = function () {
+          try {
+            renderer.dispose();
+          } catch (err) {}
+        };
+      }
+      try {
+        boot();
+      } catch (err) {
+        console.error(err);
+      }
+    })();
+  };
+  if (!window.__BONSAI_HOLD_LANDING) App.bootLanding();
+}
+if (window.THREE)
+  (function () {
+    var TAU = Math.PI * 2;
+    var UP = new THREE.Vector3(0, 1, 0);
+    var MOT = REDUCED ? 0.35 : 1;
+    var clamp = THREE.MathUtils.clamp;
+    var lerp = THREE.MathUtils.lerp;
+    function mulberry32(a) {
+      return function () {
+        a |= 0;
+        a = (a + 1831565813) | 0;
+        var t = Math.imul(a ^ (a >>> 15), 1 | a);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+    function easeOutCubic(t) {
+      return 1 - Math.pow(1 - t, 3);
+    }
+    function easeOutBack(t) {
+      var c = 1.35;
+      return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2);
+    }
+    function SC(hex) {
+      return new THREE.Color(hex).convertSRGBToLinear();
+    }
+    function canvasTex(size, draw) {
+      var cv = document.createElement("canvas");
+      cv.width = cv.height = size;
+      draw(cv.getContext("2d"), size);
+      return new THREE.CanvasTexture(cv);
+    }
+    var glowTex = canvasTex(256, function (g, s) {
+      var r = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+      r.addColorStop(0, "rgba(255,255,255,1)");
+      r.addColorStop(0.25, "rgba(255,255,255,0.5)");
+      r.addColorStop(0.6, "rgba(255,255,255,0.11)");
+      r.addColorStop(1, "rgba(255,255,255,0)");
+      g.fillStyle = r;
+      g.fillRect(0, 0, s, s);
+    });
+    var petalTex = canvasTex(64, function (g, s) {
+      g.translate(s / 2, s / 2);
+      g.scale(1, 1.45);
+      var r = g.createRadialGradient(0, 0, 1, 0, 0, s * 0.32);
+      r.addColorStop(0, "rgba(255,240,246,1)");
+      r.addColorStop(0.55, "rgba(244,206,221,0.95)");
+      r.addColorStop(1, "rgba(238,190,208,0)");
+      g.fillStyle = r;
+      g.beginPath();
+      g.arc(0, 0, s * 0.32, 0, TAU);
+      g.fill();
+    });
+    petalTex.encoding = THREE.sRGBEncoding;
+    var barkTex = canvasTex(256, function (g, s) {
+      g.fillStyle = "#463327";
+      g.fillRect(0, 0, s, s);
+      for (var i = 0; i < 170; i++) {
+        var x = Math.random() * s;
+        g.strokeStyle =
+          Math.random() < 0.5
+            ? "rgba(26,17,11," + (0.1 + Math.random() * 0.26) + ")"
+            : "rgba(99,77,58," + (0.08 + Math.random() * 0.2) + ")";
+        g.lineWidth = 1 + Math.random() * 2.2;
+        g.beginPath();
+        g.moveTo(x, 0);
+        var y = 0;
+        while (y < s) {
+          y += 8 + Math.random() * 14;
+          g.lineTo(x + (Math.random() - 0.5) * 7, y);
+        }
+        g.stroke();
+      }
+      for (var j = 0; j < 700; j++) {
+        g.fillStyle = "rgba(0,0,0," + Math.random() * 0.12 + ")";
+        g.fillRect(Math.random() * s, Math.random() * s, 1.5, 1.5);
+      }
+    });
+    barkTex.wrapS = barkTex.wrapT = THREE.RepeatWrapping;
+    barkTex.encoding = THREE.sRGBEncoding;
+    var groundTex = canvasTex(512, function (g, s) {
+      var r = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+      r.addColorStop(0, "#10141c");
+      r.addColorStop(0.45, "#0a0d13");
+      r.addColorStop(1, "#050609");
+      g.fillStyle = r;
+      g.fillRect(0, 0, s, s);
+    });
+    groundTex.encoding = THREE.sRGBEncoding;
+    var shadowTex = canvasTex(256, function (g, s) {
+      var r = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+      r.addColorStop(0, "rgba(0,0,0,0.62)");
+      r.addColorStop(0.6, "rgba(0,0,0,0.25)");
+      r.addColorStop(1, "rgba(0,0,0,0)");
+      g.fillStyle = r;
+      g.fillRect(0, 0, s, s);
+    });
+    var canvas = byId("sceneB");
+    var renderer;
+    try {
+      renderer = new THREE.WebGLRenderer({
+        canvas,
+        antialias: true,
+        alpha: true,
+      });
+    } catch (e) {
+      App.flatMode();
+      return;
+    }
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.outputEncoding = THREE.sRGBEncoding;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.28;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.setClearColor(329225, 0);
+    var scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(329225, 0.045);
+    var camera = new THREE.PerspectiveCamera(
+      39,
+      window.innerWidth / window.innerHeight,
+      0.1,
+      100,
+    );
+    var hemi = new THREE.HemisphereLight(3556700, 1053723, 0.95);
+    scene.add(hemi);
+    var moonLight = new THREE.DirectionalLight(14083327, 1);
+    moonLight.position.set(-5.5, 8.5, -4);
+    moonLight.castShadow = true;
+    moonLight.shadow.mapSize.set(2048, 2048);
+    moonLight.shadow.camera.left = -6;
+    moonLight.shadow.camera.right = 6;
+    moonLight.shadow.camera.top = 6;
+    moonLight.shadow.camera.bottom = -6;
+    moonLight.shadow.camera.near = 2;
+    moonLight.shadow.camera.far = 24;
+    moonLight.shadow.bias = -4e-4;
+    moonLight.shadow.normalBias = 0.025;
+    moonLight.target.position.set(0, 1.4, 0);
+    scene.add(moonLight, moonLight.target);
+    var fillLight = new THREE.DirectionalLight(7045022, 0.4);
+    fillLight.position.set(4, 3, 6);
+    scene.add(fillLight);
+    var ember = new THREE.PointLight(16763296, 0.1, 9, 2);
+    ember.position.set(-2.6, 0.9, 2.4);
+    scene.add(ember);
+    var canopyLight = new THREE.PointLight(16752568, 0, 5.5, 2);
+    canopyLight.position.set(0, 2.4, 0);
+    scene.add(canopyLight);
+    var ground = new THREE.Mesh(
+      new THREE.CircleGeometry(24, 64),
+      new THREE.MeshStandardMaterial({
+        map: groundTex,
+        roughness: 0.95,
+        metalness: 0,
+      }),
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
+    scene.add(ground);
+    function contactShadow(radius, opacity, x, z) {
+      var m = new THREE.Mesh(
+        new THREE.PlaneGeometry(radius * 2, radius * 2),
+        new THREE.MeshBasicMaterial({
+          map: shadowTex,
+          transparent: true,
+          opacity,
+          depthWrite: false,
+        }),
+      );
+      m.rotation.x = -Math.PI / 2;
+      m.position.set(x, 0.004, z);
+      scene.add(m);
+    }
+    contactShadow(1.9, 0.55, 0, 0);
+    contactShadow(0.55, 0.4, 2.15, 0.7);
+    var pot = new THREE.Mesh(
+      new THREE.LatheGeometry(
+        [
+          new THREE.Vector2(0.62, 0),
+          new THREE.Vector2(1.02, 0.02),
+          new THREE.Vector2(1.13, 0.1),
+          new THREE.Vector2(1.19, 0.26),
+          new THREE.Vector2(1.21, 0.42),
+          new THREE.Vector2(1.28, 0.47),
+          new THREE.Vector2(1.3, 0.55),
+          new THREE.Vector2(1.22, 0.57),
+          new THREE.Vector2(1.15, 0.55),
+          new THREE.Vector2(1.08, 0.5),
+        ],
+        56,
+      ),
+      new THREE.MeshPhysicalMaterial({
+        color: SC(2305602),
+        roughness: 0.34,
+        metalness: 0.06,
+        clearcoat: 0.75,
+        clearcoatRoughness: 0.35,
+        side: THREE.DoubleSide,
+      }),
+    );
+    pot.castShadow = true;
+    pot.receiveShadow = true;
+    scene.add(pot);
+    var soil = new THREE.Mesh(
+      new THREE.SphereGeometry(1, 24, 12),
+      new THREE.MeshStandardMaterial({ color: SC(1182983), roughness: 1 }),
+    );
+    soil.scale.set(1.04, 0.13, 1.04);
+    soil.position.y = 0.5;
+    soil.receiveShadow = true;
+    scene.add(soil);
+    var stone = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(0.3, 1),
+      new THREE.MeshPhysicalMaterial({
+        color: SC(2304564),
+        roughness: 0.45,
+        clearcoat: 0.25,
+        clearcoatRoughness: 0.5,
+      }),
+    );
+    stone.scale.set(1, 0.55, 0.82);
+    stone.position.set(2.15, 0.16, 0.7);
+    stone.rotation.y = 0.7;
+    stone.castShadow = true;
+    stone.receiveShadow = true;
+    scene.add(stone);
+    function makeSprite(color, opacity, sx, sy, x, y, z) {
+      var m = new THREE.SpriteMaterial({
+        map: glowTex,
+        color,
+        transparent: true,
+        opacity,
+        depthWrite: false,
+        fog: false,
+        blending: THREE.AdditiveBlending,
+      });
+      var s = new THREE.Sprite(m);
+      s.scale.set(sx, sy, 1);
+      s.position.set(x, y, z);
+      scene.add(s);
+      return s;
+    }
+    var barkMat = new THREE.MeshStandardMaterial({
+      map: barkTex,
+      bumpMap: barkTex,
+      bumpScale: 0.012,
+      roughness: 0.92,
+      metalness: 0,
+    });
+    var blossomMat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.62,
+      metalness: 0,
+      emissive: SC(2101274),
+      emissiveIntensity: 0.55,
+    });
+    var mossMatA = new THREE.MeshStandardMaterial({
+      color: SC(2240541),
+      roughness: 1,
+    });
+    var mossMatB = new THREE.MeshStandardMaterial({
+      color: SC(3096103),
+      roughness: 1,
+    });
+    var MOSS_GEO = new THREE.SphereGeometry(1, 8, 6);
+    var padPalette = [
+      SC(16245738),
+      SC(15780825),
+      SC(15119302),
+      SC(16512243),
+      SC(15914974),
+    ];
+    var WHITE = new THREE.Color(16777215);
+    var blossomTpl = null;
+    function makeBlossoms(rx, ry, count, rng) {
+      if (!blossomTpl) {
+        var tpl = new THREE.IcosahedronGeometry(1, 0);
+        blossomTpl = tpl.index ? tpl.toNonIndexed() : tpl;
+      }
+      var sp = blossomTpl.attributes.position.array;
+      var sn = blossomTpl.attributes.normal.array;
+      var vc = sp.length / 3;
+      var P = new Float32Array(count * vc * 3);
+      var N = new Float32Array(count * vc * 3);
+      var C = new Float32Array(count * vc * 3);
+      var q = new THREE.Quaternion(),
+        e = new THREE.Euler();
+      var v = new THREE.Vector3(),
+        nv = new THREE.Vector3(),
+        col = new THREE.Color();
+      var o = 0;
+      for (var b = 0; b < count; b++) {
+        var th = rng() * TAU,
+          u = rng() * 2 - 1,
+          r2 = Math.sqrt(1 - u * u);
+        var rr = Math.pow(rng(), 0.34);
+        var px = r2 * Math.cos(th) * rx * rr;
+        var py = u * ry * rr;
+        var pz = r2 * Math.sin(th) * rx * rr;
+        var s = (0.085 + rng() * 0.085 + rx * 0.05) * 0.92;
+        e.set(rng() * Math.PI, rng() * Math.PI, rng() * Math.PI);
+        q.setFromEuler(e);
+        col.copy(padPalette[(rng() * padPalette.length) | 0]);
+        col.lerp(WHITE, Math.max(0, py / ry) * 0.45 + rng() * 0.12);
+        for (var i = 0; i < vc; i++) {
+          v.set(sp[i * 3], sp[i * 3 + 1] * 0.82, sp[i * 3 + 2])
+            .multiplyScalar(s)
+            .applyQuaternion(q);
+          P[o] = v.x + px;
+          P[o + 1] = v.y + py;
+          P[o + 2] = v.z + pz;
+          nv.set(sn[i * 3], sn[i * 3 + 1], sn[i * 3 + 2]).applyQuaternion(q);
+          N[o] = nv.x;
+          N[o + 1] = nv.y;
+          N[o + 2] = nv.z;
+          C[o] = col.r;
+          C[o + 1] = col.g;
+          C[o + 2] = col.b;
+          o += 3;
+        }
+      }
+      var g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(P, 3));
+      g.setAttribute("normal", new THREE.BufferAttribute(N, 3));
+      g.setAttribute("color", new THREE.BufferAttribute(C, 3));
+      return g;
+    }
+    var DUR = [0.3, 0.13, 0.09, 0.07];
+    var NSEG = [9, 6, 5, 4];
+    function buildTree(seed) {
+      var rng = mulberry32(seed);
+      var R = function (a, b) {
+        return a + (b - a) * rng();
+      };
+      var group = new THREE.Group();
+      var segs = [],
+        pads = [],
+        bloomers = [],
+        joints = [];
+      var leanA = R(0, TAU);
+      var leanV = new THREE.Vector3(
+        Math.cos(leanA),
+        0,
+        Math.sin(leanA) * 0.6,
+      ).normalize();
+      function addSeg(p0, p1, r0, r1, t0, t1) {
+        var dir = new THREE.Vector3().subVectors(p1, p0);
+        var len = dir.length();
+        if (len < 1e-4) return;
+        dir.normalize();
+        var geo = new THREE.CylinderGeometry(
+          Math.max(r1, 0.004),
+          Math.max(r0, 0.005),
+          len,
+          8,
+          1,
+        );
+        geo.translate(0, len / 2, 0);
+        var m = new THREE.Mesh(geo, barkMat);
+        m.position.copy(p0);
+        m.quaternion.setFromUnitVectors(UP, dir);
+        m.castShadow = true;
+        m.visible = false;
+        group.add(m);
+        segs.push({ mesh: m, t0, t1 });
+      }
+      function addJoint(p, r, t) {
+        var m = new THREE.Mesh(MOSS_GEO, barkMat);
+        m.position.copy(p);
+        m.castShadow = true;
+        m.visible = false;
+        group.add(m);
+        joints.push({ mesh: m, r, t });
+      }
+      function grow(pos, dir, len, rad, depth, t0) {
+        var n = NSEG[depth];
+        var dur = DUR[depth] * R(0.9, 1.12);
+        var endRad = depth === 0 ? rad * 0.4 : Math.max(rad * 0.28, 0.011);
+        var ph = R(0, TAU);
+        var bendM = R(0.95, 1.35);
+        var p = pos.clone();
+        var d = dir.clone().normalize();
+        var pts = [p.clone()];
+        var outward = d.clone();
+        outward.y = 0;
+        if (outward.lengthSq() < 0.001)
+          outward.set(Math.cos(leanA + Math.PI), 0, Math.sin(leanA + Math.PI));
+        outward.normalize();
+        for (var i = 0; i < n; i++) {
+          var f = (i + 1) / n;
+          var steer = new THREE.Vector3();
+          if (depth === 0) {
+            var sway =
+              (Math.sin(f * Math.PI * 1.9 + ph) * 0.8 +
+                Math.sin(f * Math.PI * 0.9) * 0.5) *
+              bendM;
+            steer.addScaledVector(leanV, sway * 0.75);
+            steer.y = 0.85;
+          } else {
+            steer.y = f < 0.55 ? -0.42 : -0.42 + ((f - 0.55) / 0.45) * 1.35;
+            steer.addScaledVector(outward, 0.6);
+          }
+          d.addScaledVector(steer, 1.7 / n);
+          d.x += R(-1, 1) * 0.09;
+          d.y += R(-1, 1) * 0.05;
+          d.z += R(-1, 1) * 0.09;
+          d.normalize();
+          var sl = (len / n) * R(0.88, 1.12);
+          var np = p.clone().addScaledVector(d, sl);
+          if (np.y < 0.75) {
+            np.y = 0.75 + (0.75 - np.y) * 0.25;
+            d.copy(np).sub(p).normalize();
+          }
+          pts.push(np.clone());
+          p = np;
+        }
+        var rAt = function (f2) {
+          return rad + (endRad - rad) * Math.pow(f2, 0.85);
+        };
+        for (var jI = 1; jI < n; jI++) {
+          var jr = rAt(jI / n);
+          if (jr >= 0.026) addJoint(pts[jI], jr, t0 + dur * (jI / n));
+        }
+        for (var k = 0; k < n; k++) {
+          addSeg(
+            pts[k],
+            pts[k + 1],
+            rAt(k / n),
+            rAt((k + 1) / n),
+            t0 + dur * (k / n),
+            t0 + dur * ((k + 1) / n),
+          );
+        }
+        return {
+          pts,
+          rAt,
+          n,
+          dEnd: d.clone(),
+          tEnd: t0 + dur,
+          tAt: function (f2) {
+            return t0 + dur * f2;
+          },
+        };
+      }
+      function addPad(pos, rx, tStart) {
+        var ry = rx * R(0.42, 0.55);
+        var count = Math.floor(26 + rx * 62);
+        var geo = makeBlossoms(rx, ry, count, rng);
+        var mesh = new THREE.Mesh(geo, blossomMat);
+        mesh.castShadow = true;
+        var g = new THREE.Group();
+        g.position.copy(pos);
+        g.add(mesh);
+        var sm = new THREE.SpriteMaterial({
+          map: glowTex,
+          color: SC(16767462),
+          transparent: true,
+          opacity: 0,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          fog: false,
+        });
+        var spr = new THREE.Sprite(sm);
+        spr.scale.set(rx * 4.6, rx * 3.4, 1);
+        g.add(spr);
+        g.scale.setScalar(1e-4);
+        g.visible = false;
+        group.add(g);
+        pads.push({
+          g,
+          spr: sm,
+          base: pos.clone(),
+          rx,
+          ready: Math.min(tStart, 0.86),
+          t0: 0.9,
+          t1: 0.99,
+          phase: R(0, TAU),
+          k: 0,
+          done: false,
+          popT: 0,
+          sx: 0,
+          sz: 0,
+        });
+      }
+      function padPos(info) {
+        return info.pts[info.n]
+          .clone()
+          .add(
+            new THREE.Vector3(
+              R(-1, 1) * 0.05,
+              0.1 + R(0, 0.06),
+              R(-1, 1) * 0.05,
+            ),
+          );
+      }
+      function limb(pos, dir, len, rad, depth, t0) {
+        var info = grow(pos, dir, len, Math.max(rad, 0.02), depth, t0);
+        if (depth === 1) {
+          var fm = R(0.45, 0.7);
+          var idx = Math.max(1, Math.round(fm * info.n));
+          var md = info.pts[idx]
+            .clone()
+            .sub(info.pts[idx - 1])
+            .normalize()
+            .applyAxisAngle(UP, R(0.5, 0.95) * (rng() < 0.5 ? -1 : 1));
+          md.y = R(-0.05, 0.25);
+          limb(
+            info.pts[idx],
+            md.normalize(),
+            len * R(0.5, 0.65),
+            info.rAt(idx / info.n) * 0.75,
+            2,
+            info.tAt(idx / info.n),
+          );
+          for (var k = 0; k < 2; k++) {
+            var fd = info.dEnd
+              .clone()
+              .applyAxisAngle(UP, (k ? -1 : 1) * R(0.35, 0.75));
+            fd.y += R(0.05, 0.35);
+            fd.normalize();
+            limb(
+              info.pts[info.n],
+              fd,
+              len * R(0.45, 0.6),
+              info.rAt(1) * 0.9,
+              2,
+              info.tEnd,
+            );
+          }
+        } else if (depth === 2) {
+          if (rng() < 0.62) {
+            var td = info.dEnd.clone().applyAxisAngle(UP, R(-0.6, 0.6));
+            td.y += R(0.1, 0.4);
+            td.normalize();
+            limb(
+              info.pts[info.n],
+              td,
+              len * R(0.5, 0.65),
+              info.rAt(1) * 0.9,
+              3,
+              info.tEnd,
+            );
+            if (rng() < 0.5) addPad(padPos(info), R(0.42, 0.6), info.tEnd);
+          } else {
+            addPad(padPos(info), R(0.55, 0.78), info.tEnd);
+          }
+        } else if (depth === 3) {
+          addPad(padPos(info), R(0.36, 0.5), info.tEnd);
+        }
+        return info;
+      }
+      var base = new THREE.Vector3(0, 0.55, 0);
+      for (var ri = 0; ri < 6; ri++) {
+        var ra = (ri / 6) * TAU + R(-0.3, 0.3);
+        var od = new THREE.Vector3(Math.cos(ra), 0, Math.sin(ra));
+        var rp0 = base.clone().addScaledVector(od, 0.04);
+        rp0.y = 0.6;
+        var rp1 = base.clone().addScaledVector(od, R(0.24, 0.34));
+        rp1.y = 0.53;
+        addSeg(
+          rp0,
+          rp1,
+          0.16 * R(0.5, 0.7),
+          0.012,
+          0.02 + ri * 0.008,
+          0.1 + ri * 0.008,
+        );
+      }
+      for (var mj = 0; mj < 9; mj++) {
+        var mrr = R(0.1, 0.62),
+          maa = R(0, TAU);
+        var mm = new THREE.Mesh(MOSS_GEO, mj % 3 ? mossMatA : mossMatB);
+        mm.position.set(
+          Math.cos(maa) * mrr,
+          0.615 - mrr * 0.09,
+          Math.sin(maa) * mrr,
+        );
+        var msx = R(0.08, 0.17);
+        mm.castShadow = true;
+        mm.visible = false;
+        group.add(mm);
+        bloomers.push({
+          node: mm,
+          s: new THREE.Vector3(msx, msx * 0.36, msx * R(0.8, 1.2)),
+          t0: 0.02 + mj * 0.01,
+          t1: 0.1 + mj * 0.012,
+        });
+      }
+      var trunk = grow(
+        base,
+        leanV.clone().multiplyScalar(0.45).add(UP).normalize(),
+        R(2.45, 2.85),
+        R(0.15, 0.185),
+        0,
+        0.02,
+      );
+      var attach = [0.34, 0.52, 0.7, 0.86];
+      for (var ai = 0; ai < attach.length; ai++) {
+        var af = clamp(attach[ai] + R(-0.05, 0.05), 0.3, 0.9);
+        var aidx = Math.round(af * trunk.n);
+        var yaw = leanA + Math.PI + ai * 2.399 + R(-0.3, 0.3);
+        var adir = new THREE.Vector3(
+          Math.cos(yaw),
+          R(-0.12, 0.12),
+          Math.sin(yaw),
+        ).normalize();
+        var alen = lerp(1.85, 0.85, af) * R(0.85, 1.15);
+        limb(
+          trunk.pts[aidx],
+          adir,
+          alen,
+          trunk.rAt(af) * 0.58,
+          1,
+          trunk.tAt(Math.min(1, aidx / trunk.n)),
+        );
+      }
+      for (var ci = 0; ci < 2; ci++) {
+        var cy = R(0, TAU);
+        var cdir = new THREE.Vector3(
+          Math.cos(cy) * 0.7,
+          1,
+          Math.sin(cy) * 0.7,
+        ).normalize();
+        limb(
+          trunk.pts[trunk.n],
+          cdir,
+          R(0.7, 0.95),
+          trunk.rAt(1) * 0.85,
+          2,
+          trunk.tEnd,
+        );
+      }
+      addPad(
+        trunk.pts[trunk.n].clone().add(new THREE.Vector3(0, 0.28, 0)),
+        R(0.6, 0.8),
+        trunk.tEnd + 0.02,
+      );
+      pads.sort(function (a, b) {
+        return a.base.y - b.base.y;
+      });
+      var bs0 = 0.55,
+        bs1 = 0.985;
+      var slot = (bs1 - bs0) / Math.max(pads.length, 1);
+      for (var si = 0; si < pads.length; si++) {
+        var pdd = pads[si];
+        pdd.t0 = Math.max(bs0 + si * slot, pdd.ready + 0.01);
+        pdd.t1 = Math.min(pdd.t0 + Math.max(slot * 2.2, 0.045), 0.995);
+      }
+      var cen = new THREE.Vector3();
+      if (pads.length) {
+        for (var pi = 0; pi < pads.length; pi++) cen.add(pads[pi].base);
+        cen.multiplyScalar(1 / pads.length);
+      } else {
+        cen.set(0, 2.3, 0);
+      }
+      return { group, segs, pads, bloomers, joints, canopy: cen };
+    }
+    var PET_N = 110;
+    var petals = new THREE.InstancedMesh(
+      new THREE.PlaneGeometry(0.085, 0.12),
+      new THREE.MeshBasicMaterial({
+        map: petalTex,
+        transparent: true,
+        opacity: 0.9,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+      PET_N,
+    );
+    petals.frustumCulled = false;
+    petals.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    scene.add(petals);
+    var pet = [];
+    for (var pj = 0; pj < PET_N; pj++) {
+      pet.push({
+        on: false,
+        p: new THREE.Vector3(),
+        r: new THREE.Euler(),
+        vr: { x: 0, y: 0, z: 0 },
+        vy: 0,
+        ph: 0,
+        life: 0,
+        size: 1,
+      });
+    }
+    var DUMMY = new THREE.Object3D();
+    function spawnPetal() {
+      var cands = [];
+      for (var i = 0; i < T.pads.length; i++)
+        if (T.pads[i].k > 0.55) cands.push(T.pads[i]);
+      if (!cands.length) return;
+      for (var j = 0; j < PET_N; j++) {
+        var q = pet[j];
+        if (q.on) continue;
+        var pd = cands[(Math.random() * cands.length) | 0];
+        var th = Math.random() * TAU,
+          u = Math.random() * 2 - 1,
+          r2 = Math.sqrt(1 - u * u);
+        q.p.set(
+          pd.base.x + r2 * Math.cos(th) * pd.rx * 0.9,
+          pd.base.y + u * pd.rx * 0.45,
+          pd.base.z + r2 * Math.sin(th) * pd.rx * 0.9,
+        );
+        q.r.set(Math.random() * TAU, Math.random() * TAU, Math.random() * TAU);
+        q.vr.x = (Math.random() - 0.5) * 2.4;
+        q.vr.y = (Math.random() - 0.5) * 2.4;
+        q.vr.z = (Math.random() - 0.5) * 2.4;
+        q.vy = 0.05 + Math.random() * 0.1;
+        q.ph = Math.random() * TAU;
+        q.life = 0;
+        q.size = 0.75 + Math.random() * 0.5;
+        q.on = true;
+        return;
+      }
+    }
+    var spawnAcc = 0;
+    function updatePetals(dt, t) {
+      var rate = bloom > 0.35 ? lerp(0, 3.6, (bloom - 0.35) / 0.65) : 0;
+      if (state.doneAt && t - doneAtLocal < 4) rate *= 1.8;
+      spawnAcc += rate * dt * MOT;
+      while (spawnAcc > 1) {
+        spawnAcc -= 1;
+        spawnPetal();
+      }
+      for (var i = 0; i < PET_N; i++) {
+        var q = pet[i];
+        if (!q.on) {
+          DUMMY.position.set(0, -10, 0);
+          DUMMY.scale.setScalar(1e-4);
+          DUMMY.rotation.set(0, 0, 0);
+        } else {
+          q.vy = Math.min(q.vy + dt * 0.15, 0.5);
+          q.p.y -= q.vy * dt;
+          q.p.x +=
+            (Math.sin(t * 1.2 + q.ph) * 0.35 + wind * 0.45 + gustX * 1.1) * dt;
+          q.p.z += (Math.cos(t * 0.9 + q.ph) * 0.18 + gustZ * 1.1) * dt;
+          q.r.x += q.vr.x * dt;
+          q.r.y += q.vr.y * dt;
+          q.r.z += q.vr.z * dt;
+          q.life += dt;
+          if (q.p.y < 0.03) q.on = false;
+          var fade = Math.min(1, (q.p.y - 0.02) * 4) * Math.min(1, q.life * 3);
+          DUMMY.position.copy(q.p);
+          DUMMY.rotation.copy(q.r);
+          DUMMY.scale.setScalar(Math.max(q.size * fade, 0.001));
+        }
+        DUMMY.updateMatrix();
+        petals.setMatrixAt(i, DUMMY.matrix);
+      }
+      petals.instanceMatrix.needsUpdate = true;
+    }
+    var bloom = 0;
+    function updateGrowth(p) {
+      var i, k;
+      for (i = 0; i < T.segs.length; i++) {
+        var s = T.segs[i];
+        k = (p - s.t0) / (s.t1 - s.t0);
+        if (k <= 0) {
+          s.mesh.visible = false;
+          continue;
+        }
+        s.mesh.visible = true;
+        var kk = Math.min(k, 1);
+        var tk = clamp((p - s.t0) / (0.985 - s.t0), 0, 1);
+        var th = 0.34 + 0.66 * easeOutCubic(tk);
+        s.mesh.scale.set(th, Math.max(kk, 0.001), th);
+      }
+      for (i = 0; i < T.joints.length; i++) {
+        var jn = T.joints[i];
+        if (p <= jn.t) {
+          jn.mesh.visible = false;
+          continue;
+        }
+        jn.mesh.visible = true;
+        var jk = clamp((p - jn.t) / (0.985 - jn.t), 0, 1);
+        jn.mesh.scale.setScalar(jn.r * (0.34 + 0.66 * easeOutCubic(jk)));
+      }
+      for (i = 0; i < T.bloomers.length; i++) {
+        var b = T.bloomers[i];
+        k = clamp((p - b.t0) / (b.t1 - b.t0), 0, 1);
+        if (k <= 0) {
+          b.node.visible = false;
+          continue;
+        }
+        b.node.visible = true;
+        b.node.scale.copy(b.s).multiplyScalar(Math.max(easeOutBack(k), 1e-4));
+      }
+      var sum = 0;
+      for (i = 0; i < T.pads.length; i++) {
+        var pd = T.pads[i];
+        k = clamp((p - pd.t0) / (pd.t1 - pd.t0), 0, 1);
+        pd.k = k;
+        sum += k;
+        if (k <= 0) {
+          pd.g.visible = false;
+          continue;
+        }
+        pd.g.visible = true;
+        pd.g.scale.setScalar(Math.max(easeOutBack(k), 1e-4));
+      }
+      bloom = T.pads.length ? sum / T.pads.length : 0;
+    }
+    var T = buildTree(SEED);
+    scene.add(T.group);
+    canopyLight.position.copy(T.canopy);
+    updateGrowth(FREEZE !== null ? FREEZE : 0);
+    var shakeAmp = 0,
+      shakeSeed = 0;
+    window.addEventListener("pointerdown", function () {
+      if (App.stage !== "loading") return;
+      shakeAmp = Math.min(shakeAmp + 0.85, 1.15);
+      shakeSeed = Math.random() * TAU;
+      if (bloom > 0.2) for (var i = 0; i < 9; i++) spawnPetal();
+    });
+    var gustX = 0,
+      gustZ = 0,
+      leanX = 0,
+      leanZ = 0;
+    var lastPX = null;
+    var camAngCur = 0;
+    window.addEventListener("pointermove", function (e) {
+      if (App.stage !== "loading") {
+        lastPX = null;
+        return;
+      }
+      if (lastPX !== null) {
+        var dx = clamp(
+          ((e.clientX - lastPX) / window.innerWidth) * 3,
+          -0.35,
+          0.35,
+        );
+        gustX += dx * Math.cos(camAngCur);
+        gustZ += dx * -Math.sin(camAngCur);
+        var m = Math.sqrt(gustX * gustX + gustZ * gustZ);
+        if (m > 1.3) {
+          gustX *= 1.3 / m;
+          gustZ *= 1.3 / m;
+        }
+      }
+      lastPX = e.clientX;
+    });
+    window.addEventListener("pointerleave", function () {
+      lastPX = null;
+    });
+    function onResize() {
+      var a = window.innerWidth / window.innerHeight;
+      camera.aspect = a;
+      camera.fov = a < 1 ? clamp((39 / a) * 0.92, 39, 60) : 39;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+    window.addEventListener("resize", onResize);
+    onResize();
+    var clock = new THREE.Clock();
+    var elapsed = 0,
+      wind = 0,
+      doneAtLocal = -1;
+    function animate() {
+      if (document.body.classList.contains("stage-chat")) return;
+      requestAnimationFrame(animate);
+      var dt = Math.min(clock.getDelta(), 0.05);
+      elapsed += dt;
+      var t = elapsed;
+      var nowS = performance.now() / 1e3;
+      wind = Math.sin(t * 0.31) * 0.5 + Math.sin(t * 0.13 + 2) * 0.5;
+      var gust = Math.max(0, wind);
+      var progress = stepProgress(dt, nowS);
+      if (state.doneAt && doneAtLocal < 0) doneAtLocal = t;
+      updateGrowth(progress);
+      var pulse = 0;
+      if (doneAtLocal >= 0) {
+        var cp = t - doneAtLocal;
+        if (cp < 3.2) pulse = Math.sin(Math.min(cp / 3.2, 1) * Math.PI) * 0.7;
+      }
+      canopyLight.intensity = bloom * 0.7 + pulse * 0.5;
+      for (var gi = 0; gi < T.pads.length; gi++) {
+        var pd = T.pads[gi];
+        if (pd.k >= 0.999) {
+          if (!pd.done) {
+            pd.done = true;
+            pd.popT = t;
+          }
+        } else {
+          pd.done = false;
+          pd.popT = 0;
+        }
+        var pop = pd.popT ? Math.exp(-(t - pd.popT) * 3.5) * 0.32 : 0;
+        pd.spr.opacity = (0.17 * pd.k + pop) * (1 + pulse * 0.8);
+        if (pd.k > 0) {
+          var lag = Math.min(1, dt * (2.2 + (pd.phase % 1.7)));
+          pd.sx += (leanX - pd.sx) * lag;
+          pd.sz += (leanZ - pd.sz) * lag;
+          var jig = Math.sin(t * 13 + pd.phase * 3) * shakeAmp;
+          pd.g.position.x = pd.base.x + pd.sx * 0.16 + jig * 0.06;
+          pd.g.position.z = pd.base.z + pd.sz * 0.16 + jig * 0.03;
+          pd.g.position.y =
+            pd.base.y +
+            Math.sin(t * 0.7 + pd.phase) * 0.02 * pd.k * MOT +
+            Math.abs(jig) * 0.05;
+        }
+      }
+      var dk = Math.exp(-dt * 2);
+      gustX *= dk;
+      gustZ *= dk;
+      leanX += (gustX - leanX) * Math.min(1, dt * 4.5);
+      leanZ += (gustZ - leanZ) * Math.min(1, dt * 4.5);
+      shakeAmp *= Math.exp(-dt * 2.6);
+      var wobble = Math.sin(t * 13 + shakeSeed) * shakeAmp;
+      T.group.rotation.z =
+        Math.sin(t * 0.6) * 0.005 * (0.6 + 0.4 * gust) * MOT -
+        leanX * 0.055 +
+        wobble * 0.02;
+      T.group.rotation.x =
+        Math.sin(t * 0.43 + 1) * 0.004 * MOT + leanZ * 0.055 + wobble * 0.012;
+      updatePetals(dt, t);
+      var introK = easeOutCubic(Math.min(1, elapsed / 3.5));
+      var ang, dist, camY;
+      if (AZ_FIX !== null) {
+        ang = AZ_FIX;
+        dist = 7.9;
+        camY = 2.05;
+      } else {
+        ang = t * (TAU / 80) * MOT + Math.sin(t * 0.11) * 0.05;
+        dist = 7.9 + Math.sin(t * 0.05 + 1.3) * 0.5 * MOT + (1 - introK) * 1.6;
+        camY = 2.05 + Math.sin(t * 0.07) * 0.28 * MOT - (1 - introK) * 0.35;
+      }
+      camAngCur = ang;
+      camera.position.set(Math.sin(ang) * dist, camY, Math.cos(ang) * dist);
+      camera.lookAt(0, 1.62, 0);
+      renderer.render(scene, camera);
+      updateDom(nowS);
+    }
+    camera.position.set(0, 1.7, 9.5);
+    camera.lookAt(0, 1.62, 0);
+    renderer.render(scene, camera);
+    App.startGarden = function () {
+      clock.getDelta();
+      animate();
+    };
+  })();
+if (window.THREE && START_STAGE === "loading") {
+  document.body.classList.remove("stage-landing");
+  document.body.classList.add("stage-loading", "ready");
+  if (App.startGarden) App.startGarden();
+  if (FREEZE === null && QS.has("demo"))
+    setTimeout(() => {
+      if (!state.external) simulate();
+    }, 700);
+}
