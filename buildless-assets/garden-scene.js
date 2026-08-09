@@ -274,6 +274,23 @@ if (window.THREE)
     ];
     var WHITE = new THREE.Color(16777215);
     var blossomTpl = null;
+    function placeBlossom(rx, ry, rng) {
+      const theta = rng() * TAU;
+      const u = rng() * 2 - 1;
+      const r = Math.sqrt(1 - u * u);
+      const radiusScale = Math.pow(rng(), 0.34);
+      const px = r * Math.cos(theta) * rx * radiusScale;
+      const py = u * ry * radiusScale;
+      const pz = r * Math.sin(theta) * rx * radiusScale;
+      const scale = (0.085 + rng() * 0.085 + rx * 0.05) * 0.92;
+      const quat = new THREE.Quaternion().setFromEuler(
+        new THREE.Euler(rng() * Math.PI, rng() * Math.PI, rng() * Math.PI),
+      );
+      const color = padPalette[(rng() * padPalette.length) | 0].clone();
+      color.lerp(WHITE, Math.max(0, py / ry) * 0.45 + rng() * 0.12);
+      return { px, py, pz, scale, quat, color };
+    }
+
     function makeBlossoms(rx, ry, count, rng) {
       if (!blossomTpl) {
         var tpl = new THREE.IcosahedronGeometry(1, 0);
@@ -285,39 +302,27 @@ if (window.THREE)
       var positions = new Float32Array(count * vertexCount * 3);
       var normals = new Float32Array(count * vertexCount * 3);
       var colors = new Float32Array(count * vertexCount * 3);
-      var quat = new THREE.Quaternion(),
-        euler = new THREE.Euler();
       var vertex = new THREE.Vector3(),
-        normal = new THREE.Vector3(),
-        color = new THREE.Color();
+        normal = new THREE.Vector3();
       var offset = 0;
       for (var blossom = 0; blossom < count; blossom++) {
-        var theta = rng() * TAU,
-          u = rng() * 2 - 1,
-          r = Math.sqrt(1 - u * u);
-        var radiusScale = Math.pow(rng(), 0.34);
-        var px = r * Math.cos(theta) * rx * radiusScale;
-        var py = u * ry * radiusScale;
-        var pz = r * Math.sin(theta) * rx * radiusScale;
-        var scale = (0.085 + rng() * 0.085 + rx * 0.05) * 0.92;
-        euler.set(rng() * Math.PI, rng() * Math.PI, rng() * Math.PI);
-        quat.setFromEuler(euler);
-        color.copy(padPalette[(rng() * padPalette.length) | 0]);
-        color.lerp(WHITE, Math.max(0, py / ry) * 0.45 + rng() * 0.12);
+        var placement = placeBlossom(rx, ry, rng);
         for (var i = 0; i < vertexCount; i++) {
           vertex.set(srcPos[i * 3], srcPos[i * 3 + 1] * 0.82, srcPos[i * 3 + 2])
-            .multiplyScalar(scale)
-            .applyQuaternion(quat);
-          positions[offset] = vertex.x + px;
-          positions[offset + 1] = vertex.y + py;
-          positions[offset + 2] = vertex.z + pz;
-          normal.set(srcNorm[i * 3], srcNorm[i * 3 + 1], srcNorm[i * 3 + 2]).applyQuaternion(quat);
+            .multiplyScalar(placement.scale)
+            .applyQuaternion(placement.quat);
+          positions[offset] = vertex.x + placement.px;
+          positions[offset + 1] = vertex.y + placement.py;
+          positions[offset + 2] = vertex.z + placement.pz;
+          normal
+            .set(srcNorm[i * 3], srcNorm[i * 3 + 1], srcNorm[i * 3 + 2])
+            .applyQuaternion(placement.quat);
           normals[offset] = normal.x;
           normals[offset + 1] = normal.y;
           normals[offset + 2] = normal.z;
-          colors[offset] = color.r;
-          colors[offset + 1] = color.g;
-          colors[offset + 2] = color.b;
+          colors[offset] = placement.color.r;
+          colors[offset + 1] = placement.color.g;
+          colors[offset + 2] = placement.color.b;
           offset += 3;
         }
       }
@@ -329,23 +334,27 @@ if (window.THREE)
     }
     var DUR = [0.3, 0.13, 0.09, 0.07];
     var NSEG = [9, 6, 5, 4];
-    function buildTree(seed) {
-      var rng = mulberry32(seed);
-      var R = function (a, b) {
-        return a + (b - a) * rng();
-      };
-      var group = new THREE.Group();
-      var segs = [],
-        pads = [],
-        bloomers = [],
-        joints = [];
-      var leanAngle = R(0, TAU);
-      var leanVec = new THREE.Vector3(
-        Math.cos(leanAngle),
-        0,
-        Math.sin(leanAngle) * 0.6,
-      ).normalize();
-      function addSeg(p0, p1, r0, r1, t0, t1) {
+    class TreeBuilder {
+      constructor(seed) {
+        this.rng = mulberry32(seed);
+        this.group = new THREE.Group();
+        this.segs = [];
+        this.pads = [];
+        this.bloomers = [];
+        this.joints = [];
+        this.leanAngle = this.R(0, TAU);
+        this.leanVec = new THREE.Vector3(
+          Math.cos(this.leanAngle),
+          0,
+          Math.sin(this.leanAngle) * 0.6,
+        ).normalize();
+      }
+
+      R(a, b) {
+        return a + (b - a) * this.rng();
+      }
+
+      addSeg(p0, p1, r0, r1, t0, t1) {
         var dir = new THREE.Vector3().subVectors(p1, p0);
         var len = dir.length();
         if (len < 1e-4) return;
@@ -363,52 +372,58 @@ if (window.THREE)
         m.quaternion.setFromUnitVectors(UP, dir);
         m.castShadow = true;
         m.visible = false;
-        group.add(m);
-        segs.push({ mesh: m, t0, t1 });
+        this.group.add(m);
+        this.segs.push({ mesh: m, t0, t1 });
       }
-      function addJoint(p, r, t) {
+
+      addJoint(p, r, t) {
         var m = new THREE.Mesh(MOSS_GEO, barkMat);
         m.position.copy(p);
         m.castShadow = true;
         m.visible = false;
-        group.add(m);
-        joints.push({ mesh: m, r, t });
+        this.group.add(m);
+        this.joints.push({ mesh: m, r, t });
       }
-      function grow(pos, direction, len, rad, depth, t0) {
-        var n = NSEG[depth];
-        var dur = DUR[depth] * R(0.9, 1.12);
-        var endRad = depth === 0 ? rad * 0.4 : Math.max(rad * 0.28, 0.011);
-        var phase = R(0, TAU);
-        var bendMag = R(0.95, 1.35);
-        var point = pos.clone();
-        var dir = direction.clone().normalize();
-        var pts = [point.clone()];
-        var outward = dir.clone();
+      steerForSegment(depth, f, phase, bendMag, leanVec, outward) {
+        const steer = new THREE.Vector3();
+        if (depth === 0) {
+          const sway =
+            (Math.sin(f * Math.PI * 1.9 + phase) * 0.8 +
+              Math.sin(f * Math.PI * 0.9) * 0.5) *
+            bendMag;
+          steer.addScaledVector(leanVec, sway * 0.75);
+          steer.y = 0.85;
+        } else {
+          steer.y = f < 0.55 ? -0.42 : -0.42 + ((f - 0.55) / 0.45) * 1.35;
+          steer.addScaledVector(outward, 0.6);
+        }
+        return steer;
+      }
+
+      growSegments(n, len, depth, phase, bendMag, point, dir) {
+        const pts = [point.clone()];
+        const outward = dir.clone();
         outward.y = 0;
-        if (outward.lengthSq() < 0.001)
-          outward.set(Math.cos(leanAngle + Math.PI), 0, Math.sin(leanAngle + Math.PI));
+        if (outward.lengthSq() < 0.001) {
+          outward.set(
+            Math.cos(this.leanAngle + Math.PI),
+            0,
+            Math.sin(this.leanAngle + Math.PI),
+          );
+        }
         outward.normalize();
-        for (var i = 0; i < n; i++) {
-          var f = (i + 1) / n;
-          var steer = new THREE.Vector3();
-          if (depth === 0) {
-            var sway =
-              (Math.sin(f * Math.PI * 1.9 + phase) * 0.8 +
-                Math.sin(f * Math.PI * 0.9) * 0.5) *
-              bendMag;
-            steer.addScaledVector(leanVec, sway * 0.75);
-            steer.y = 0.85;
-          } else {
-            steer.y = f < 0.55 ? -0.42 : -0.42 + ((f - 0.55) / 0.45) * 1.35;
-            steer.addScaledVector(outward, 0.6);
-          }
-          dir.addScaledVector(steer, 1.7 / n);
-          dir.x += R(-1, 1) * 0.09;
-          dir.y += R(-1, 1) * 0.05;
-          dir.z += R(-1, 1) * 0.09;
+        for (let i = 0; i < n; i++) {
+          const f = (i + 1) / n;
+          dir.addScaledVector(
+            this.steerForSegment(depth, f, phase, bendMag, this.leanVec, outward),
+            1.7 / n,
+          );
+          dir.x += this.R(-1, 1) * 0.09;
+          dir.y += this.R(-1, 1) * 0.05;
+          dir.z += this.R(-1, 1) * 0.09;
           dir.normalize();
-          var segLen = (len / n) * R(0.88, 1.12);
-          var next = point.clone().addScaledVector(dir, segLen);
+          const segLen = (len / n) * this.R(0.88, 1.12);
+          const next = point.clone().addScaledVector(dir, segLen);
           if (next.y < 0.75) {
             next.y = 0.75 + (0.75 - next.y) * 0.25;
             dir.copy(next).sub(point).normalize();
@@ -416,16 +431,33 @@ if (window.THREE)
           pts.push(next.clone());
           point = next;
         }
-        var radiusAt = function (f) {
-          return rad + (endRad - rad) * Math.pow(f, 0.85);
-        };
-        for (var j = 1; j < n; j++) {
-          var jointRadius = radiusAt(j / n);
+        return pts;
+      }
+
+      grow(pos, direction, len, rad, depth, t0) {
+        const n = NSEG[depth];
+        const dur = DUR[depth] * this.R(0.9, 1.12);
+        const endRad = depth === 0 ? rad * 0.4 : Math.max(rad * 0.28, 0.011);
+        const phase = this.R(0, TAU);
+        const bendMag = this.R(0.95, 1.35);
+        const dir = direction.clone().normalize();
+        const pts = this.growSegments(
+          n,
+          len,
+          depth,
+          phase,
+          bendMag,
+          pos.clone(),
+          dir,
+        );
+        const radiusAt = (f) => rad + (endRad - rad) * Math.pow(f, 0.85);
+        for (let j = 1; j < n; j++) {
+          const jointRadius = radiusAt(j / n);
           if (jointRadius >= 0.026)
-            addJoint(pts[j], jointRadius, t0 + dur * (j / n));
+            this.addJoint(pts[j], jointRadius, t0 + dur * (j / n));
         }
-        for (var k = 0; k < n; k++) {
-          addSeg(
+        for (let k = 0; k < n; k++) {
+          this.addSeg(
             pts[k],
             pts[k + 1],
             radiusAt(k / n),
@@ -440,15 +472,13 @@ if (window.THREE)
           n,
           dirEnd: dir.clone(),
           timeEnd: t0 + dur,
-          timeAt: function (f) {
-            return t0 + dur * f;
-          },
+          timeAt: (f) => t0 + dur * f,
         };
       }
-      function addPad(pos, rx, tStart) {
-        var ry = rx * R(0.42, 0.55);
+      addPad(pos, rx, tStart) {
+        var ry = rx * this.R(0.42, 0.55);
         var count = Math.floor(26 + rx * 62);
-        var geometry = makeBlossoms(rx, ry, count, rng);
+        var geometry = makeBlossoms(rx, ry, count, this.rng);
         var mesh = new THREE.Mesh(geometry, blossomMat);
         mesh.castShadow = true;
         var padGroup = new THREE.Group();
@@ -468,8 +498,8 @@ if (window.THREE)
         padGroup.add(sprite);
         padGroup.scale.setScalar(1e-4);
         padGroup.visible = false;
-        group.add(padGroup);
-        pads.push({
+        this.group.add(padGroup);
+        this.pads.push({
           group: padGroup,
           spriteMaterial: spriteMat,
           base: pos.clone(),
@@ -477,7 +507,7 @@ if (window.THREE)
           ready: Math.min(tStart, 0.86),
           t0: 0.9,
           t1: 0.99,
-          phase: R(0, TAU),
+          phase: this.R(0, TAU),
           growth: 0,
           done: false,
           popTime: 0,
@@ -485,178 +515,230 @@ if (window.THREE)
           swayZ: 0,
         });
       }
-      function padPos(info) {
+
+      padPos(info) {
         return info.pts[info.n]
           .clone()
           .add(
             new THREE.Vector3(
-              R(-1, 1) * 0.05,
-              0.1 + R(0, 0.06),
-              R(-1, 1) * 0.05,
+              this.R(-1, 1) * 0.05,
+              0.1 + this.R(0, 0.06),
+              this.R(-1, 1) * 0.05,
             ),
           );
       }
-      function limb(pos, dir, len, rad, depth, t0) {
-        var info = grow(pos, dir, len, Math.max(rad, 0.02), depth, t0);
+      limb(pos, dir, len, rad, depth, t0) {
+        const info = this.grow(pos, dir, len, Math.max(rad, 0.02), depth, t0);
         if (depth === 1) {
-          var forkFrac = R(0.45, 0.7);
-          var idx = Math.max(1, Math.round(forkFrac * info.n));
-          var midDir = info.pts[idx]
-            .clone()
-            .sub(info.pts[idx - 1])
-            .normalize()
-            .applyAxisAngle(UP, R(0.5, 0.95) * (rng() < 0.5 ? -1 : 1));
-          midDir.y = R(-0.05, 0.25);
-          limb(
-            info.pts[idx],
-            midDir.normalize(),
-            len * R(0.5, 0.65),
-            info.radiusAt(idx / info.n) * 0.75,
-            2,
-            info.timeAt(idx / info.n),
-          );
-          for (var k = 0; k < 2; k++) {
-            var forkDir = info.dirEnd
-              .clone()
-              .applyAxisAngle(UP, (k ? -1 : 1) * R(0.35, 0.75));
-            forkDir.y += R(0.05, 0.35);
-            forkDir.normalize();
-            limb(
-              info.pts[info.n],
-              forkDir,
-              len * R(0.45, 0.6),
-              info.radiusAt(1) * 0.9,
-              2,
-              info.timeEnd,
-            );
-          }
+          this.growFork(info, len);
         } else if (depth === 2) {
-          if (rng() < 0.62) {
-            var twigDir = info.dirEnd.clone().applyAxisAngle(UP, R(-0.6, 0.6));
-            twigDir.y += R(0.1, 0.4);
-            twigDir.normalize();
-            limb(
-              info.pts[info.n],
-              twigDir,
-              len * R(0.5, 0.65),
-              info.radiusAt(1) * 0.9,
-              3,
-              info.timeEnd,
-            );
-            if (rng() < 0.5) addPad(padPos(info), R(0.42, 0.6), info.timeEnd);
-          } else {
-            addPad(padPos(info), R(0.55, 0.78), info.timeEnd);
-          }
+          this.growTwig(info, len);
         } else if (depth === 3) {
-          addPad(padPos(info), R(0.36, 0.5), info.timeEnd);
+          this.addPad(this.padPos(info), this.R(0.36, 0.5), info.timeEnd);
         }
         return info;
       }
-      var base = new THREE.Vector3(0, 0.55, 0);
-      for (var i = 0; i < 6; i++) {
-        var rootAngle = (i / 6) * TAU + R(-0.3, 0.3);
-        var rootDir = new THREE.Vector3(Math.cos(rootAngle), 0, Math.sin(rootAngle));
-        var rp0 = base.clone().addScaledVector(rootDir, 0.04);
-        rp0.y = 0.6;
-        var rp1 = base.clone().addScaledVector(rootDir, R(0.24, 0.34));
-        rp1.y = 0.53;
-        addSeg(
-          rp0,
-          rp1,
-          0.16 * R(0.5, 0.7),
-          0.012,
-          0.02 + i * 0.008,
-          0.1 + i * 0.008,
-        );
-      }
-      for (var j = 0; j < 9; j++) {
-        var mossRadius = R(0.1, 0.62),
-          mossAngle = R(0, TAU);
-        var moss = new THREE.Mesh(MOSS_GEO, j % 3 ? mossMatA : mossMatB);
-        moss.position.set(
-          Math.cos(mossAngle) * mossRadius,
-          0.615 - mossRadius * 0.09,
-          Math.sin(mossAngle) * mossRadius,
-        );
-        var mossScale = R(0.08, 0.17);
-        moss.castShadow = true;
-        moss.visible = false;
-        group.add(moss);
-        bloomers.push({
-          node: moss,
-          scale: new THREE.Vector3(mossScale, mossScale * 0.36, mossScale * R(0.8, 1.2)),
-          t0: 0.02 + j * 0.01,
-          t1: 0.1 + j * 0.012,
-        });
-      }
-      var trunk = grow(
-        base,
-        leanVec.clone().multiplyScalar(0.45).add(UP).normalize(),
-        R(2.45, 2.85),
-        R(0.15, 0.185),
-        0,
-        0.02,
-      );
-      var attach = [0.34, 0.52, 0.7, 0.86];
-      for (var ai = 0; ai < attach.length; ai++) {
-        var attachFrac = clamp(attach[ai] + R(-0.05, 0.05), 0.3, 0.9);
-        var aidx = Math.round(attachFrac * trunk.n);
-        var yaw = leanAngle + Math.PI + ai * 2.399 + R(-0.3, 0.3);
-        var attachDir = new THREE.Vector3(
-          Math.cos(yaw),
-          R(-0.12, 0.12),
-          Math.sin(yaw),
-        ).normalize();
-        var attachLen = lerp(1.85, 0.85, attachFrac) * R(0.85, 1.15);
-        limb(
-          trunk.pts[aidx],
-          attachDir,
-          attachLen,
-          trunk.radiusAt(attachFrac) * 0.58,
-          1,
-          trunk.timeAt(Math.min(1, aidx / trunk.n)),
-        );
-      }
-      for (var ci = 0; ci < 2; ci++) {
-        var canopyAngle = R(0, TAU);
-        var canopyDir = new THREE.Vector3(
-          Math.cos(canopyAngle) * 0.7,
-          1,
-          Math.sin(canopyAngle) * 0.7,
-        ).normalize();
-        limb(
-          trunk.pts[trunk.n],
-          canopyDir,
-          R(0.7, 0.95),
-          trunk.radiusAt(1) * 0.85,
+
+      growFork(info, len) {
+        const forkFrac = this.R(0.45, 0.7);
+        const idx = Math.max(1, Math.round(forkFrac * info.n));
+        const midDir = info.pts[idx]
+          .clone()
+          .sub(info.pts[idx - 1])
+          .normalize()
+          .applyAxisAngle(UP, this.R(0.5, 0.95) * (this.rng() < 0.5 ? -1 : 1));
+        midDir.y = this.R(-0.05, 0.25);
+        this.limb(
+          info.pts[idx],
+          midDir.normalize(),
+          len * this.R(0.5, 0.65),
+          info.radiusAt(idx / info.n) * 0.75,
           2,
-          trunk.timeEnd,
+          info.timeAt(idx / info.n),
+        );
+        for (let k = 0; k < 2; k++) {
+          const forkDir = info.dirEnd
+            .clone()
+            .applyAxisAngle(UP, (k ? -1 : 1) * this.R(0.35, 0.75));
+          forkDir.y += this.R(0.05, 0.35);
+          forkDir.normalize();
+          this.limb(
+            info.pts[info.n],
+            forkDir,
+            len * this.R(0.45, 0.6),
+            info.radiusAt(1) * 0.9,
+            2,
+            info.timeEnd,
+          );
+        }
+      }
+
+      growTwig(info, len) {
+        if (this.rng() < 0.62) {
+          const twigDir = info.dirEnd
+            .clone()
+            .applyAxisAngle(UP, this.R(-0.6, 0.6));
+          twigDir.y += this.R(0.1, 0.4);
+          twigDir.normalize();
+          this.limb(
+            info.pts[info.n],
+            twigDir,
+            len * this.R(0.5, 0.65),
+            info.radiusAt(1) * 0.9,
+            3,
+            info.timeEnd,
+          );
+          if (this.rng() < 0.5) {
+            this.addPad(this.padPos(info), this.R(0.42, 0.6), info.timeEnd);
+          }
+        } else {
+          this.addPad(this.padPos(info), this.R(0.55, 0.78), info.timeEnd);
+        }
+      }
+      build() {
+        this.buildRoots();
+        this.buildMoss();
+        const trunk = this.grow(
+          new THREE.Vector3(0, 0.55, 0),
+          this.leanVec.clone().multiplyScalar(0.45).add(UP).normalize(),
+          this.R(2.45, 2.85),
+          this.R(0.15, 0.185),
+          0,
+          0.02,
+        );
+        this.attachBranches(trunk);
+        this.buildCanopy(trunk);
+        this.schedulePadBloom();
+        return {
+          group: this.group,
+          segs: this.segs,
+          pads: this.pads,
+          bloomers: this.bloomers,
+          joints: this.joints,
+          canopy: this.canopyCenter(),
+        };
+      }
+
+      buildRoots() {
+        const base = new THREE.Vector3(0, 0.55, 0);
+        for (let i = 0; i < 6; i++) {
+          const rootAngle = (i / 6) * TAU + this.R(-0.3, 0.3);
+          const rootDir = new THREE.Vector3(
+            Math.cos(rootAngle),
+            0,
+            Math.sin(rootAngle),
+          );
+          const rootP0 = base.clone().addScaledVector(rootDir, 0.04);
+          rootP0.y = 0.6;
+          const rootP1 = base.clone().addScaledVector(rootDir, this.R(0.24, 0.34));
+          rootP1.y = 0.53;
+          this.addSeg(
+            rootP0,
+            rootP1,
+            0.16 * this.R(0.5, 0.7),
+            0.012,
+            0.02 + i * 0.008,
+            0.1 + i * 0.008,
+          );
+        }
+      }
+
+      buildMoss() {
+        for (let j = 0; j < 9; j++) {
+          const mossRadius = this.R(0.1, 0.62);
+          const mossAngle = this.R(0, TAU);
+          const moss = new THREE.Mesh(MOSS_GEO, j % 3 ? mossMatA : mossMatB);
+          moss.position.set(
+            Math.cos(mossAngle) * mossRadius,
+            0.615 - mossRadius * 0.09,
+            Math.sin(mossAngle) * mossRadius,
+          );
+          const mossScale = this.R(0.08, 0.17);
+          moss.castShadow = true;
+          moss.visible = false;
+          this.group.add(moss);
+          this.bloomers.push({
+            node: moss,
+            scale: new THREE.Vector3(
+              mossScale,
+              mossScale * 0.36,
+              mossScale * this.R(0.8, 1.2),
+            ),
+            t0: 0.02 + j * 0.01,
+            t1: 0.1 + j * 0.012,
+          });
+        }
+      }
+
+      attachBranches(trunk) {
+        const attach = [0.34, 0.52, 0.7, 0.86];
+        for (let i = 0; i < attach.length; i++) {
+          const attachFrac = clamp(attach[i] + this.R(-0.05, 0.05), 0.3, 0.9);
+          const attachIdx = Math.round(attachFrac * trunk.n);
+          const yaw = this.leanAngle + Math.PI + i * 2.399 + this.R(-0.3, 0.3);
+          const attachDir = new THREE.Vector3(
+            Math.cos(yaw),
+            this.R(-0.12, 0.12),
+            Math.sin(yaw),
+          ).normalize();
+          const attachLen = lerp(1.85, 0.85, attachFrac) * this.R(0.85, 1.15);
+          this.limb(
+            trunk.pts[attachIdx],
+            attachDir,
+            attachLen,
+            trunk.radiusAt(attachFrac) * 0.58,
+            1,
+            trunk.timeAt(Math.min(1, attachIdx / trunk.n)),
+          );
+        }
+      }
+
+      buildCanopy(trunk) {
+        for (let i = 0; i < 2; i++) {
+          const canopyAngle = this.R(0, TAU);
+          const canopyDir = new THREE.Vector3(
+            Math.cos(canopyAngle) * 0.7,
+            1,
+            Math.sin(canopyAngle) * 0.7,
+          ).normalize();
+          this.limb(
+            trunk.pts[trunk.n],
+            canopyDir,
+            this.R(0.7, 0.95),
+            trunk.radiusAt(1) * 0.85,
+            2,
+            trunk.timeEnd,
+          );
+        }
+        this.addPad(
+          trunk.pts[trunk.n].clone().add(new THREE.Vector3(0, 0.28, 0)),
+          this.R(0.6, 0.8),
+          trunk.timeEnd + 0.02,
         );
       }
-      addPad(
-        trunk.pts[trunk.n].clone().add(new THREE.Vector3(0, 0.28, 0)),
-        R(0.6, 0.8),
-        trunk.timeEnd + 0.02,
-      );
-      pads.sort(function (a, b) {
-        return a.base.y - b.base.y;
-      });
-      var bloomStart = 0.55,
-        bloomEnd = 0.985;
-      var slot = (bloomEnd - bloomStart) / Math.max(pads.length, 1);
-      for (var i = 0; i < pads.length; i++) {
-        var pad = pads[i];
-        pad.t0 = Math.max(bloomStart + i * slot, pad.ready + 0.01);
-        pad.t1 = Math.min(pad.t0 + Math.max(slot * 2.2, 0.045), 0.995);
+
+      schedulePadBloom() {
+        this.pads.sort((a, b) => a.base.y - b.base.y);
+        const bloomStart = 0.55;
+        const bloomEnd = 0.985;
+        const slot = (bloomEnd - bloomStart) / Math.max(this.pads.length, 1);
+        for (let i = 0; i < this.pads.length; i++) {
+          const pad = this.pads[i];
+          pad.t0 = Math.max(bloomStart + i * slot, pad.ready + 0.01);
+          pad.t1 = Math.min(pad.t0 + Math.max(slot * 2.2, 0.045), 0.995);
+        }
       }
-      var cen = new THREE.Vector3();
-      if (pads.length) {
-        for (var i = 0; i < pads.length; i++) cen.add(pads[i].base);
-        cen.multiplyScalar(1 / pads.length);
-      } else {
-        cen.set(0, 2.3, 0);
+
+      canopyCenter() {
+        const center = new THREE.Vector3();
+        if (this.pads.length) {
+          for (const pad of this.pads) center.add(pad.base);
+          center.multiplyScalar(1 / this.pads.length);
+        } else {
+          center.set(0, 2.3, 0);
+        }
+        return center;
       }
-      return { group, segs, pads, bloomers, joints, canopy: cen };
     }
     var PET_N = 110;
     var petals = new THREE.InstancedMesh(
@@ -806,7 +888,7 @@ if (window.THREE)
       }
       bloom = tree.pads.length ? sum / tree.pads.length : 0;
     }
-    var tree = buildTree(SEED);
+    var tree = new TreeBuilder(SEED).build();
     scene.add(tree.group);
     canopyLight.position.copy(tree.canopy);
     updateGrowth(FREEZE !== null ? FREEZE : 0);
@@ -861,23 +943,7 @@ if (window.THREE)
     var elapsed = 0,
       wind = 0,
       doneAtLocal = -1;
-    function animate() {
-      if (document.body.classList.contains("stage-chat")) return;
-      requestAnimationFrame(animate);
-      var dt = Math.min(clock.getDelta(), 0.05);
-      elapsed += dt;
-      var t = elapsed;
-      var nowS = performance.now() / 1e3;
-      wind = Math.sin(t * 0.31) * 0.5 + Math.sin(t * 0.13 + 2) * 0.5;
-      var gust = Math.max(0, wind);
-      var progress = stepProgress(dt, nowS);
-      if (state.doneAt && doneAtLocal < 0) doneAtLocal = t;
-      updateGrowth(progress);
-      var pulse = 0;
-      if (doneAtLocal >= 0) {
-        var cp = t - doneAtLocal;
-        if (cp < 3.2) pulse = Math.sin(Math.min(cp / 3.2, 1) * Math.PI) * 0.7;
-      }
+    function updatePadsAndMotion(dt, t, pulse) {
       canopyLight.intensity = bloom * 0.7 + pulse * 0.5;
       for (var i = 0; i < tree.pads.length; i++) {
         var pad = tree.pads[i];
@@ -912,14 +978,16 @@ if (window.THREE)
       leanZ += (gustZ - leanZ) * Math.min(1, dt * 4.5);
       shakeAmp *= Math.exp(-dt * 2.6);
       var wobble = Math.sin(t * 13 + shakeSeed) * shakeAmp;
+      var gust = Math.max(0, wind);
       tree.group.rotation.z =
         Math.sin(t * 0.6) * 0.005 * (0.6 + 0.4 * gust) * MOT -
         leanX * 0.055 +
         wobble * 0.02;
       tree.group.rotation.x =
         Math.sin(t * 0.43 + 1) * 0.004 * MOT + leanZ * 0.055 + wobble * 0.012;
-      updatePetals(dt, t);
-      var introK = easeOutCubic(Math.min(1, elapsed / 3.5));
+    }
+
+    function updateCamera(t, introK) {
       var ang, dist, camY;
       if (AZ_FIX !== null) {
         ang = AZ_FIX;
@@ -933,6 +1001,27 @@ if (window.THREE)
       camAngCur = ang;
       camera.position.set(Math.sin(ang) * dist, camY, Math.cos(ang) * dist);
       camera.lookAt(0, 1.62, 0);
+    }
+
+    function animate() {
+      if (document.body.classList.contains("stage-chat")) return;
+      requestAnimationFrame(animate);
+      var dt = Math.min(clock.getDelta(), 0.05);
+      elapsed += dt;
+      var t = elapsed;
+      var nowS = performance.now() / 1e3;
+      wind = Math.sin(t * 0.31) * 0.5 + Math.sin(t * 0.13 + 2) * 0.5;
+      var progress = stepProgress(dt, nowS);
+      if (state.doneAt && doneAtLocal < 0) doneAtLocal = t;
+      updateGrowth(progress);
+      var pulse = 0;
+      if (doneAtLocal >= 0) {
+        var cp = t - doneAtLocal;
+        if (cp < 3.2) pulse = Math.sin(Math.min(cp / 3.2, 1) * Math.PI) * 0.7;
+      }
+      updatePadsAndMotion(dt, t, pulse);
+      updatePetals(dt, t);
+      updateCamera(t, easeOutCubic(Math.min(1, elapsed / 3.5)));
       renderer.render(scene, camera);
       updateDom(nowS);
     }

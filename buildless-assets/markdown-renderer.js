@@ -30,64 +30,37 @@ function ensureKatexCss() {
   link.dataset.katex = "1";
   document.head.appendChild(link);
 }
+function katexExtension(name, startRe, tokenRe, display) {
+  return {
+    name,
+    level: "inline",
+    start(src) {
+      return src.match(startRe)?.index;
+    },
+    tokenizer(src) {
+      const m = tokenRe.exec(src);
+      if (m) return { type: name, raw: m[0], text: m[1] };
+    },
+    renderer(token) {
+      return stashKatex(token.text, display);
+    },
+  };
+}
+
 function makeKatexExtension() {
-  const inline = {
-    name: "katexInline",
-    level: "inline",
-    start(src) {
-      return src.match(/\\\(/)?.index;
-    },
-    tokenizer(src) {
-      const m = /^\\\(([\s\S]+?)\\\)/.exec(src);
-      if (m) return { type: "katexInline", raw: m[0], text: m[1] };
-    },
-    renderer(token) {
-      return stashKatex(token.text, false);
-    },
+  return {
+    extensions: [
+      katexExtension("katexDollarBlock", /\$\$/, /^\$\$([\s\S]+?)\$\$/, true),
+      katexExtension("katexBlock", /\\\[/, /^\\\[([\s\S]+?)\\\]/, true),
+      katexExtension("katexInline", /\\\(/, /^\\\(([\s\S]+?)\\\)/, false),
+      katexExtension(
+        "katexDollarInline",
+        /\$/,
+        /^\$(?!\s|\$)((?:\\.|[^\\$\n])+?)(?<!\s)\$(?!\d)/,
+        false,
+      ),
+    ],
   };
-  const block = {
-    name: "katexBlock",
-    level: "inline",
-    start(src) {
-      return src.match(/\\\[/)?.index;
-    },
-    tokenizer(src) {
-      const m = /^\\\[([\s\S]+?)\\\]/.exec(src);
-      if (m) return { type: "katexBlock", raw: m[0], text: m[1] };
-    },
-    renderer(token) {
-      return stashKatex(token.text, true);
-    },
-  };
-  const dollarBlock = {
-    name: "katexDollarBlock",
-    level: "inline",
-    start(src) {
-      return src.match(/\$\$/)?.index;
-    },
-    tokenizer(src) {
-      const m = /^\$\$([\s\S]+?)\$\$/.exec(src);
-      if (m) return { type: "katexDollarBlock", raw: m[0], text: m[1] };
-    },
-    renderer(token) {
-      return stashKatex(token.text, true);
-    },
-  };
-  const dollarInline = {
-    name: "katexDollarInline",
-    level: "inline",
-    start(src) {
-      return src.match(/\$/)?.index;
-    },
-    tokenizer(src) {
-      const m = /^\$(?!\s|\$)((?:\\.|[^\\$\n])+?)(?<!\s)\$(?!\d)/.exec(src);
-      if (m) return { type: "katexDollarInline", raw: m[0], text: m[1] };
-    },
-    renderer(token) {
-      return stashKatex(token.text, false);
-    },
-  };
-  return { extensions: [dollarBlock, block, inline, dollarInline] };
 }
 function renderKatex(text, display) {
   const key = (display ? "d:" : "i:") + text;

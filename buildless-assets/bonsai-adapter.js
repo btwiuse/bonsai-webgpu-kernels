@@ -42,6 +42,26 @@ function createProgressReporter(onProgress) {
   };
 }
 
+function assertOverflowSupported(source, overflow) {
+  if (source === BONSAI_27B.id && overflow === "sinks") {
+    throw new Error(
+      "bitgpu: overflow 'sinks' is not supported by Bonsai-27B's qwen3_5 hybrid backbone. Remove ?overflow=sinks.",
+    );
+  }
+}
+
+async function resolveModelSource(source, ggufUrl, request, onProgress) {
+  const useOfficialManifest = source === BONSAI_27B.id;
+  onProgress({
+    status: "init",
+    message: useOfficialManifest ? "Loading model manifest" : "Parsing GGUF header",
+  });
+  const model = useOfficialManifest
+    ? { manifestUrl: BONSAI_27B.manifestUrl, auxUrl: BONSAI_27B.auxUrl }
+    : await fromGguf(ggufUrl, { fetchRange: request.fetchRange });
+  return { model, useOfficialManifest };
+}
+
 class BonsaiChat {
   constructor(engine, nativeChat, defaultGeneration = {}) {
     this.engine = engine;
@@ -106,25 +126,19 @@ export class Bonsai27B {
   static async load(source = DEFAULT_MODEL_ID, options = {}) {
     const onProgress = options.onProgress ?? (() => {});
     const ggufUrl = resolveGgufUrl(source, options.file);
-    const useOfficialManifest = source === BONSAI_27B.id;
-    if (useOfficialManifest && options.overflow === "sinks") {
-      throw new Error(
-        "bitgpu: overflow 'sinks' is not supported by Bonsai-27B's qwen3_5 hybrid backbone. Remove ?overflow=sinks.",
-      );
-    }
+    assertOverflowSupported(source, options.overflow);
     const request = createModelFetch({
       accessToken: options.accessToken,
       cache: options.cache,
       signal: options.signal,
     });
 
-    onProgress({
-      status: "init",
-      message: useOfficialManifest ? "Loading model manifest" : "Parsing GGUF header",
-    });
-    const model = useOfficialManifest
-      ? { manifestUrl: BONSAI_27B.manifestUrl, auxUrl: BONSAI_27B.auxUrl }
-      : await fromGguf(ggufUrl, { fetchRange: request.fetchRange });
+    const { model, useOfficialManifest } = await resolveModelSource(
+      source,
+      ggufUrl,
+      request,
+      onProgress,
+    );
 
     onProgress({ status: "init", message: "Requesting WebGPU device" });
     const runtime =

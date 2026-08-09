@@ -1,44 +1,70 @@
 // Model access, device checks, and load lifecycle for the browser runtime.
-export function setupModelAccess({
-  Bonsai27B,
-  defaultGgufFile,
-  byId,
-  getChat,
-  setChat,
-  onChatReady,
-}) {
-  const query = new URLSearchParams(location.search);
-  const requireToken = window.BONSAI_REQUIRE_HF_TOKEN === true;
-  const modelId = "prism-ml/Bonsai-27B-gguf";
-  const modelSource = query.get("src") || modelId;
-  const tokenKey = "bonsai27b_hf_token_v1";
-  const fallbackBytes = 3.8e9;
-  const gate = byId("gate");
-  const gateInput = byId("gateInput");
-  const gateError = byId("gateError");
-  const gateContinue = byId("gateContinue");
-  const gateField = byId("gateField");
-  const veil = byId("veil");
+const MODEL_ID = "prism-ml/Bonsai-27B-gguf";
+const TOKEN_KEY = "bonsai27b_hf_token_v1";
+const FALLBACK_BYTES = 3.8e9;
 
-  let loadState = "idle";
-  let loadBlocked = false;
-  let accessToken = null;
-  let reauthAfterGate = false;
+class ModelAccess {
+  constructor({
+    Bonsai27B,
+    defaultGgufFile,
+    byId,
+    getChat,
+    setChat,
+    onChatReady,
+  }) {
+    this.Bonsai27B = Bonsai27B;
+    this.defaultGgufFile = defaultGgufFile;
+    this.byId = byId;
+    this.getChat = getChat;
+    this.setChat = setChat;
+    this.onChatReady = onChatReady;
 
-  const modelOptions = () => ({
-    file: modelSource === modelId ? defaultGgufFile : undefined,
-    accessToken: accessToken ?? undefined,
-  });
+    this.query = new URLSearchParams(location.search);
+    this.requireToken = window.BONSAI_REQUIRE_HF_TOKEN === true;
+    this.modelSource = this.query.get("src") || MODEL_ID;
 
-  async function validateToken(token) {
+    this.gate = byId("gate");
+    this.gateInput = byId("gateInput");
+    this.gateError = byId("gateError");
+    this.gateContinue = byId("gateContinue");
+    this.gateField = byId("gateField");
+    this.veil = byId("veil");
+
+    this.loadState = "idle";
+    this.loadBlocked = false;
+    this.accessToken = null;
+    this.reauthAfterGate = false;
+
+    this.wireEvents();
+  }
+
+  get chat() {
+    return this.getChat();
+  }
+
+  isReady() {
+    return this.loadState === "ready";
+  }
+
+  modelOptions() {
+    return {
+      file: this.modelSource === MODEL_ID ? this.defaultGgufFile : undefined,
+      accessToken: this.accessToken ?? undefined,
+    };
+  }
+
+  async validateToken(token) {
     const trimmed = (token || "").trim();
     if (!trimmed) return { valid: false, error: "A token is required." };
     try {
-      const response = await fetch(`https://huggingface.co/api/models/${modelId}`, {
-        headers: { Authorization: `Bearer ${trimmed}` },
-      });
+      const response = await fetch(
+        `https://huggingface.co/api/models/${MODEL_ID}`,
+        { headers: { Authorization: `Bearer ${trimmed}` } },
+      );
       if (response.ok) return { valid: true };
-      if (response.status === 401) return { valid: false, error: "Invalid token." };
+      if (response.status === 401) {
+        return { valid: false, error: "Invalid token." };
+      }
       let body = null;
       try {
         body = await response.json();
@@ -50,7 +76,8 @@ export function setupModelAccess({
       ) {
         return {
           valid: false,
-          error: "This token can't access the model. Request access on the model page, then try again.",
+          error:
+            "This token can't access the model. Request access on the model page, then try again.",
         };
       }
       if (response.status === 403) {
@@ -71,126 +98,136 @@ export function setupModelAccess({
     }
   }
 
-  function showGate(prefill = "") {
-    veil.hidden = true;
-    gate.hidden = false;
-    gate.classList.remove("leave");
-    if (prefill) gateInput.value = prefill;
+  showGate(prefill = "") {
+    this.veil.hidden = true;
+    this.gate.hidden = false;
+    this.gate.classList.remove("leave");
+    if (prefill) this.gateInput.value = prefill;
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
-        gate.classList.add("show");
-        gateInput.focus();
+        this.gate.classList.add("show");
+        this.gateInput.focus();
       }),
     );
   }
 
-  function showGateError(message) {
-    gateError.textContent = message;
-    gateError.hidden = false;
-    gateField.classList.add("error");
+  showGateError(message) {
+    this.gateError.textContent = message;
+    this.gateError.hidden = false;
+    this.gateField.classList.add("error");
   }
 
-  function clearGateError() {
-    gateError.hidden = true;
-    gateField.classList.remove("error");
+  clearGateError() {
+    this.gateError.hidden = true;
+    this.gateField.classList.remove("error");
   }
 
-  function grant(token) {
-    accessToken = token;
+  grant(token) {
+    this.accessToken = token;
     try {
-      localStorage.setItem(tokenKey, token);
+      localStorage.setItem(TOKEN_KEY, token);
     } catch {}
-    gate.classList.add("leave");
+    this.gate.classList.add("leave");
     setTimeout(() => {
-      gate.hidden = true;
-      gate.classList.remove("show", "leave");
+      this.gate.hidden = true;
+      this.gate.classList.remove("show", "leave");
     }, 550);
-    if (!veil.hidden) {
-      veil.classList.add("leave");
+    if (!this.veil.hidden) {
+      this.veil.classList.add("leave");
       setTimeout(() => {
-        veil.hidden = true;
-        veil.classList.remove("leave");
+        this.veil.hidden = true;
+        this.veil.classList.remove("leave");
       }, 850);
     }
     window.App?.bootLanding?.();
-    runAvailabilityCheck();
-    if (reauthAfterGate) {
-      reauthAfterGate = false;
-      hideLoadError();
-      startLoad();
+    this.runAvailabilityCheck();
+    if (this.reauthAfterGate) {
+      this.reauthAfterGate = false;
+      this.hideLoadError();
+      this.startLoad();
     }
   }
 
-  async function submitGate() {
-    if (gateContinue.classList.contains("busy")) return;
-    const token = gateInput.value.trim();
+  async submitGate() {
+    if (this.gateContinue.classList.contains("busy")) return;
+    const token = this.gateInput.value.trim();
     if (!token) {
-      showGateError("A token is required.");
+      this.showGateError("A token is required.");
       return;
     }
-    clearGateError();
-    gateContinue.classList.add("busy");
-    gateContinue.textContent = "VALIDATING ...";
-    const result = await validateToken(token);
-    gateContinue.classList.remove("busy");
-    gateContinue.innerHTML = "CONTINUE &rarr;";
+    this.clearGateError();
+    this.gateContinue.classList.add("busy");
+    this.gateContinue.textContent = "VALIDATING ...";
+    const result = await this.validateToken(token);
+    this.gateContinue.classList.remove("busy");
+    this.gateContinue.innerHTML = "CONTINUE &rarr;";
     if (result.valid === false) {
-      showGateError(result.error);
+      this.showGateError(result.error);
       return;
     }
-    grant(token);
+    this.grant(token);
   }
 
-  async function init() {
-    if (!requireToken) {
-      runAvailabilityCheck();
+  async init() {
+    if (!this.requireToken) {
+      this.runAvailabilityCheck();
       return;
     }
     let stored = null;
     try {
-      stored = localStorage.getItem(tokenKey);
+      stored = localStorage.getItem(TOKEN_KEY);
     } catch {}
     if (!stored) {
-      showGate();
+      this.showGate();
       return;
     }
-    veil.hidden = false;
-    const result = await validateToken(stored);
+    this.veil.hidden = false;
+    const result = await this.validateToken(stored);
     if (result.valid === false) {
       try {
-        localStorage.removeItem(tokenKey);
+        localStorage.removeItem(TOKEN_KEY);
       } catch {}
-      showGate(stored);
-      showGateError(`${result.error} Enter a current token to continue.`);
+      this.showGate(stored);
+      this.showGateError(`${result.error} Enter a current token to continue.`);
       return;
     }
-    grant(stored);
+    this.grant(stored);
   }
 
-  async function runAvailabilityCheck() {
+  async runAvailabilityCheck() {
     if (!navigator.gpu) {
-      blockLoad("WebGPU isn't available in this browser. Try a recent Chrome or Edge.");
+      this.blockLoad(
+        "WebGPU isn't available in this browser. Try a recent Chrome or Edge.",
+      );
       return;
     }
     try {
-      const response = await Bonsai27B.checkAvailability(modelSource, modelOptions());
-      if (response && !response.ok && response.reason && loadState === "idle") {
-        blockLoad(response.reason);
+      const response = await this.Bonsai27B.checkAvailability(
+        this.modelSource,
+        this.modelOptions(),
+      );
+      if (
+        response &&
+        !response.ok &&
+        response.reason &&
+        this.loadState === "idle"
+      ) {
+        this.blockLoad(response.reason);
       }
     } catch {}
   }
 
-  function blockLoad(reason) {
-    loadBlocked = true;
-    const cta = byId("loadCta");
+  blockLoad(reason) {
+    this.loadBlocked = true;
+    const cta = this.byId("loadCta");
     cta.textContent = "UNAVAILABLE ON THIS DEVICE";
     cta.style.opacity = "0.45";
     cta.style.pointerEvents = "none";
-    byId("ctaNote").textContent = reason;
-    byId("ctaNote").hidden = false;
+    this.byId("ctaNote").textContent = reason;
+    this.byId("ctaNote").hidden = false;
   }
 
-  function onLoadProgress(event) {
+  onLoadProgress(event) {
     if (event.status === "init") {
       BonsaiLoader.phase((event.message || "INITIALIZING").toUpperCase());
     } else if (event.status === "tokenizer") {
@@ -202,123 +239,132 @@ export function setupModelAccess({
           event.loaded,
           Number.isFinite(event.total) && event.total > 0
             ? event.total
-            : fallbackBytes,
+            : FALLBACK_BYTES,
         );
       } else if (event.kind === "tensors") {
         if (/warmup/i.test(event.message || "")) {
           BonsaiLoader.phase("COMPILING WEBGPU KERNELS - WARMUP");
         } else if (Number.isFinite(event.total) && event.total > 0) {
-          BonsaiLoader.info({ tensors: event.loaded, tensorsTotal: event.total });
+          BonsaiLoader.info({
+            tensors: event.loaded,
+            tensorsTotal: event.total,
+          });
         }
       }
     }
   }
 
-  function showLoadError(error) {
+  showLoadError(error) {
     const message = String(error?.message ?? error);
     document.body.classList.add("load-failed");
     BonsaiLoader.phase("LOAD FAILED");
-    byId("loadErrorMsg").textContent = message;
-    byId("loadError").hidden = false;
+    this.byId("loadErrorMsg").textContent = message;
+    this.byId("loadError").hidden = false;
     const authIssue =
-      requireToken &&
+      this.requireToken &&
       /\b40[134]\b|unauthorized|forbidden|invalid token|\btoken\b|repository not found|access (denied|restricted|to model)/i.test(
         message,
       );
-    byId("changeTokenBtn").hidden = !authIssue;
+    this.byId("changeTokenBtn").hidden = !authIssue;
   }
 
-  function hideLoadError() {
+  hideLoadError() {
     document.body.classList.remove("load-failed");
-    byId("loadError").hidden = true;
+    this.byId("loadError").hidden = true;
     BonsaiLoader.phase(null);
   }
 
-  async function startLoad() {
-    if (loadState === "loading" || loadState === "ready" || loadBlocked) return;
-    loadState = "loading";
-    hideLoadError();
-    BonsaiLoader.set(0, fallbackBytes);
+  async startLoad() {
+    if (
+      this.loadState === "loading" ||
+      this.loadState === "ready" ||
+      this.loadBlocked
+    ) {
+      return;
+    }
+    this.loadState = "loading";
+    this.hideLoadError();
+    BonsaiLoader.set(0, FALLBACK_BYTES);
     BonsaiLoader.phase("REQUESTING WEBGPU DEVICE");
     if (document.body.classList.contains("stage-loading")) {
       await new Promise((resolve) => setTimeout(resolve, 1150));
     }
     try {
-      const chat = await Bonsai27B.load(modelSource, {
-        ...modelOptions(),
-        cache: query.has("nocache") ? false : undefined,
-        maxLength: Number.parseInt(query.get("ctx") ?? "", 10) || undefined,
-        overflow: query.get("overflow") === "sinks" ? "sinks" : undefined,
-        onProgress: onLoadProgress,
+      const chat = await this.Bonsai27B.load(this.modelSource, {
+        ...this.modelOptions(),
+        cache: this.query.has("nocache") ? false : undefined,
+        maxLength: Number.parseInt(this.query.get("ctx") ?? "", 10) || undefined,
+        overflow: this.query.get("overflow") === "sinks" ? "sinks" : undefined,
+        onProgress: (event) => this.onLoadProgress(event),
       });
-      setChat(chat);
-      loadState = "ready";
+      this.setChat(chat);
+      this.loadState = "ready";
       window.__bonsaiChat = chat;
-      onChatReady();
+      this.onChatReady();
       BonsaiLoader.done();
     } catch (error) {
       console.error(error);
-      loadState = "failed";
-      showLoadError(error);
+      this.loadState = "failed";
+      this.showLoadError(error);
     }
   }
 
-  gateContinue.addEventListener("click", (event) => {
-    event.preventDefault();
-    submitGate();
-  });
-  gateInput.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
+  wireEvents() {
+    const $ = this.byId;
+    this.gateContinue.addEventListener("click", (event) => {
       event.preventDefault();
-      submitGate();
-    }
-  });
-  gateInput.addEventListener("input", clearGateError);
-  byId("gateShow").addEventListener("click", () => {
-    const hidden = gateInput.type === "password";
-    gateInput.type = hidden ? "text" : "password";
-    byId("gateShow").textContent = hidden ? "HIDE" : "SHOW";
-  });
-  byId("loadCta").addEventListener(
-    "click",
-    (event) => {
-      if (loadBlocked) {
+      this.submitGate();
+    });
+    this.gateInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
         event.preventDefault();
-        event.stopImmediatePropagation();
+        this.submitGate();
       }
-    },
-    true,
-  );
-  byId("retryBtn").addEventListener("click", (event) => {
-    event.preventDefault();
-    if (loadState === "failed") {
-      hideLoadError();
-      startLoad();
-    }
-  });
-  byId("changeTokenBtn").addEventListener("click", (event) => {
-    event.preventDefault();
-    try {
-      localStorage.removeItem(tokenKey);
-    } catch {}
-    reauthAfterGate = true;
-    showGate(accessToken ?? "");
-  });
+    });
+    this.gateInput.addEventListener("input", () => this.clearGateError());
+    $("gateShow").addEventListener("click", () => {
+      const hidden = this.gateInput.type === "password";
+      this.gateInput.type = hidden ? "text" : "password";
+      $("gateShow").textContent = hidden ? "HIDE" : "SHOW";
+    });
+    $("loadCta").addEventListener(
+      "click",
+      (event) => {
+        if (this.loadBlocked) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        }
+      },
+      true,
+    );
+    $("retryBtn").addEventListener("click", (event) => {
+      event.preventDefault();
+      if (this.loadState === "failed") {
+        this.hideLoadError();
+        this.startLoad();
+      }
+    });
+    $("changeTokenBtn").addEventListener("click", (event) => {
+      event.preventDefault();
+      try {
+        localStorage.removeItem(TOKEN_KEY);
+      } catch {}
+      this.reauthAfterGate = true;
+      this.showGate(this.accessToken ?? "");
+    });
+  }
+}
 
-  window.BonsaiApp = { startLoad };
-  init();
+export function setupModelAccess(deps) {
+  const access = new ModelAccess(deps);
+  window.BonsaiApp = { startLoad: () => access.startLoad() };
+  access.init();
   if (
     document.body.classList.contains("stage-loading") &&
-    !query.has("demo") &&
-    !query.has("p")
+    !access.query.has("demo") &&
+    !access.query.has("p")
   ) {
-    startLoad();
+    access.startLoad();
   }
-
-  return {
-    get chat() {
-      return getChat();
-    },
-    isReady: () => loadState === "ready",
-  };
+  return access;
 }

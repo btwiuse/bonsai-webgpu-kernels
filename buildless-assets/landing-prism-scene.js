@@ -17,7 +17,7 @@ if (!window.THREE) {
         while (a < -Math.PI) a += Math.PI * 2;
         return a;
       };
-      function boot() {
+      try {
         if (!window.THREE) throw new Error("three.js failed to load");
         const R = 1.85;
         const DEPTH = 2.1;
@@ -291,11 +291,7 @@ if (!window.THREE) {
       float a = prof * tail * rev * shimmer * uOpacity;
       gl_FragColor = vec4(uColor * (0.72 + 0.85 * core), a);
     }`;
-        function makeBeam(
-          n,
-          hex,
-          { width = 0.05, opacity = 1, tailFade = 0, order = 6 } = {},
-        ) {
+        function createBeamGeometry(n) {
           const geo = new THREE.BufferGeometry();
           const pos = new Float32Array(n * 2 * 3);
           const tan = new Float32Array(n * 2 * 3);
@@ -328,7 +324,11 @@ if (!window.THREE) {
           geo.setAttribute("aTangent", tanAttr);
           geo.setAttribute("aSide", new THREE.BufferAttribute(side, 1));
           geo.setAttribute("aT", new THREE.BufferAttribute(tArr, 1));
-          const mat = new THREE.ShaderMaterial({
+          return { geo, pos, tan, posAttr, tanAttr };
+        }
+
+        function createBeamMaterial(hex, width, opacity, tailFade) {
+          return new THREE.ShaderMaterial({
             transparent: true,
             depthWrite: false,
             depthTest: false,
@@ -346,6 +346,15 @@ if (!window.THREE) {
             vertexShader: BEAM_VERT,
             fragmentShader: BEAM_FRAG,
           });
+        }
+
+        function makeBeam(
+          n,
+          hex,
+          { width = 0.05, opacity = 1, tailFade = 0, order = 6 } = {},
+        ) {
+          const { geo, pos, tan, posAttr, tanAttr } = createBeamGeometry(n);
+          const mat = createBeamMaterial(hex, width, opacity, tailFade);
           const mesh = new THREE.Mesh(geo, mat);
           mesh.frustumCulled = false;
           mesh.renderOrder = order;
@@ -432,19 +441,7 @@ if (!window.THREE) {
       vec3 col = mix(vCol, vec3(1.0), uHeadWhite * exp(-vT * uHeadK));
       gl_FragColor = vec4(col, edge * along * rev * vA * grain * uOpacity);
     }`;
-        function makeSheet(
-          cols,
-          rows,
-          { opacity, headWhite, headK, alongBase, alongK, order = 6 },
-        ) {
-          const count = cols * rows;
-          const geo = new THREE.BufferGeometry();
-          const pos = new Float32Array(count * 3);
-          const aW = new Float32Array(count);
-          const aT = new Float32Array(count);
-          const aAlpha = new Float32Array(count);
-          const aRev = new Float32Array(count);
-          const aCol = new Float32Array(count * 3);
+        function fillSheetAttributes(cols, rows, aW, aT, aCol) {
           for (let k = 0; k < rows; k++) {
             for (let c = 0; c < cols; c++) {
               const i = k * cols + c,
@@ -457,6 +454,18 @@ if (!window.THREE) {
               aCol[i * 3 + 2] = rgb[2];
             }
           }
+        }
+
+        function createSheetGeometry(cols, rows) {
+          const count = cols * rows;
+          const geo = new THREE.BufferGeometry();
+          const pos = new Float32Array(count * 3);
+          const aW = new Float32Array(count);
+          const aT = new Float32Array(count);
+          const aAlpha = new Float32Array(count);
+          const aRev = new Float32Array(count);
+          const aCol = new Float32Array(count * 3);
+          fillSheetAttributes(cols, rows, aW, aT, aCol);
           const idx = new Uint16Array((cols - 1) * (rows - 1) * 6);
           let o = 0;
           for (let k = 0; k < rows - 1; k++) {
@@ -486,7 +495,11 @@ if (!window.THREE) {
           geo.setAttribute("aW", new THREE.BufferAttribute(aW, 1));
           geo.setAttribute("aT", new THREE.BufferAttribute(aT, 1));
           geo.setAttribute("aColor", new THREE.BufferAttribute(aCol, 3));
-          const mat = new THREE.ShaderMaterial({
+          return { geo, pos, aAlpha, aRev, posAttr, aAttr, revAttr };
+        }
+
+        function createSheetMaterial({ opacity, headWhite, headK, alongBase, alongK }) {
+          return new THREE.ShaderMaterial({
             transparent: true,
             depthWrite: false,
             depthTest: false,
@@ -502,6 +515,22 @@ if (!window.THREE) {
             },
             vertexShader: SHEET_VERT,
             fragmentShader: SHEET_FRAG,
+          });
+        }
+
+        function makeSheet(
+          cols,
+          rows,
+          { opacity, headWhite, headK, alongBase, alongK, order = 6 },
+        ) {
+          const { geo, pos, aAlpha, aRev, posAttr, aAttr, revAttr } =
+            createSheetGeometry(cols, rows);
+          const mat = createSheetMaterial({
+            opacity,
+            headWhite,
+            headK,
+            alongBase,
+            alongK,
           });
           const mesh = new THREE.Mesh(geo, mat);
           mesh.frustumCulled = false;
@@ -1009,13 +1038,7 @@ if (!window.THREE) {
             }
           }
         }
-        function updateOptics(tA, dt, rotZ, bob) {
-          updateTri(rotZ, bob);
-          const hasEntry = castEntry();
-          const ease = 1 - Math.exp(-6 * dt);
-          entryAlpha += ((hasEntry ? 1 : 0) - entryAlpha) * ease;
-          const tP = Math.max(0, tA - T0);
-          const lamp = clamp01(tP / 0.3);
+        function updateEntryBeams(tA, hasEntry, tP) {
           buildIncoming(tA, hasEntry);
           incoming.update(INC_PTS);
           const x0 = viewX.left - 0.5;
@@ -1039,6 +1062,52 @@ if (!window.THREE) {
           residualBeam.mat.uniforms.uOpacity.value = 0.1 * entryAlpha;
           reflectBeam.mat.uniforms.uReveal.value = clamp01(pastEntry / 6);
           residualBeam.mat.uniforms.uReveal.value = clamp01(pastEntry / 12);
+          return { dIn, airT, sinceEntry };
+        }
+
+        function updateColumn(
+          c,
+          w,
+          tA,
+          airT,
+          sinceEntry,
+          ease,
+          hasEntry,
+          tP,
+          aC,
+        ) {
+          const rec = TRACES[c];
+          colAlpha[c] +=
+            ((hasEntry && rec.valid ? 1 : 0) - colAlpha[c]) * ease;
+          const zOff = (w - 0.5) * 0.3;
+          if (rec.valid) {
+            const ai = Math.atan2(rec.dy, rec.dx);
+            writeExitColumn(
+              c,
+              w,
+              rec.ex,
+              rec.ey,
+              aC + wrapPI(ai - aC) * SPREAD,
+              tA,
+              zOff,
+            );
+            writeInnerColumn(rec, c, zOff);
+            T_OUT[c] = airT + (rec.len * N_COL[c]) / CV;
+          }
+          const glassRev =
+            rec.len > 1e-6
+              ? clamp01((sinceEntry * (CV / N_COL[c])) / rec.len)
+              : 0;
+          innerSheet.setAlpha(c, colAlpha[c]);
+          innerSheet.setRev(c, glassRev);
+          exitSheet.setAlpha(c, colAlpha[c]);
+          exitSheet.setRev(
+            c,
+            clamp01((Math.max(0, tP - T_OUT[c]) * CV) / EXIT_LEN),
+          );
+        }
+
+        function traceColumns(tA, airT, sinceEntry, ease, hasEntry, tP, dt) {
           trace(N_CENTER, CTRACE);
           for (let c = 0; c < COL_COUNT; c++) trace(N_COL[c], TRACES[c]);
           const aC = centerAngle();
@@ -1048,42 +1117,26 @@ if (!window.THREE) {
             alive = 0,
             tFirstOut = Infinity;
           for (let c = 0; c < COL_COUNT; c++) {
+            updateColumn(
+              c,
+              c / (COL_COUNT - 1),
+              tA,
+              airT,
+              sinceEntry,
+              ease,
+              hasEntry,
+              tP,
+              aC,
+            );
             const rec = TRACES[c];
-            const w = c / (COL_COUNT - 1);
-            colAlpha[c] +=
-              ((hasEntry && rec.valid ? 1 : 0) - colAlpha[c]) * ease;
-            const zOff = (w - 0.5) * 0.3;
             if (rec.valid) {
               alive++;
-              const ai = Math.atan2(rec.dy, rec.dx);
-              writeExitColumn(
-                c,
-                w,
-                rec.ex,
-                rec.ey,
-                aC + wrapPI(ai - aC) * SPREAD,
-                tA,
-                zOff,
-              );
-              writeInnerColumn(rec, c, zOff);
-              T_OUT[c] = airT + (rec.len * N_COL[c]) / CV;
+              if (T_OUT[c] < tFirstOut) tFirstOut = T_OUT[c];
             }
-            const glassRev =
-              rec.len > 1e-6
-                ? clamp01((sinceEntry * (CV / N_COL[c])) / rec.len)
-                : 0;
-            innerSheet.setAlpha(c, colAlpha[c]);
-            innerSheet.setRev(c, glassRev);
-            exitSheet.setAlpha(c, colAlpha[c]);
-            exitSheet.setRev(
-              c,
-              clamp01((Math.max(0, tP - T_OUT[c]) * CV) / EXIT_LEN),
-            );
             if (rec.valid || colAlpha[c] > 0.05) {
               glowX += rec.ex * colAlpha[c];
               glowY += rec.ey * colAlpha[c];
               glowAlpha += colAlpha[c];
-              if (rec.valid && T_OUT[c] < tFirstOut) tFirstOut = T_OUT[c];
             }
           }
           exitSheet.commit();
@@ -1091,6 +1144,19 @@ if (!window.THREE) {
           const trapT = hasEntry ? (1 - alive / COL_COUNT) * 0.85 : 0;
           trapGlow += (trapT - trapGlow) * (1 - Math.exp(-3 * dt));
           innerSheet.mat.uniforms.uOpacity.value = 0.3 * (1 + trapGlow * 1.6);
+          return { glowX, glowY, glowAlpha, tFirstOut };
+        }
+
+        function updateGlowAndPulses(
+          tA,
+          tP,
+          dIn,
+          airT,
+          sinceEntry,
+          lamp,
+          hasEntry,
+          glow,
+        ) {
           for (let i = 0; i < 6; i++) {
             const c = PULSE_COL[i];
             sampleSheet(exitSheet, c, 0.38, SAMP);
@@ -1101,14 +1167,20 @@ if (!window.THREE) {
               clamp01((Math.max(0, tP - T_OUT[c]) * CV) / 5);
           }
           updatePulses(tP, dIn, airT, lamp, hasEntry);
-          const exitFront = clamp01((Math.max(0, tP - tFirstOut) * CV) / 1.5);
-          if (glowAlpha > 0.05) exitGlow.position.set(glowX / glowAlpha, glowY / glowAlpha, 0.05);
+          const exitFront = clamp01((Math.max(0, tP - glow.tFirstOut) * CV) / 1.5);
+          if (glow.glowAlpha > 0.05) {
+            exitGlow.position.set(
+              glow.glowX / glow.glowAlpha,
+              glow.glowY / glow.glowAlpha,
+              0.05,
+            );
+          }
           exitGlow.scale.setScalar(0.5 * (1 + 0.12 * Math.sin(tA * 3)));
           exitGlow.material.opacity =
-            0.9 * clamp01(glowAlpha / (COL_COUNT * 0.5)) * exitFront;
+            0.9 * clamp01(glow.glowAlpha / (COL_COUNT * 0.5)) * exitFront;
           if (hasEntry) entryGlow.position.set(ENTRY.x, ENTRY.y, 0.05);
           entryGlow.material.opacity =
-            0.7 * entryAlpha * clamp01(pastEntry / 0.7);
+            0.7 * entryAlpha * clamp01((sinceEntry * CV) / 0.7);
           samplePts(INC_PTS, 0.03, SAMP);
           sourceDot.position.copy(SAMP);
           sourceDot.scale.setScalar(0.17 + 0.02 * Math.sin(tA * 2.1));
@@ -1120,18 +1192,25 @@ if (!window.THREE) {
           for (const b of allBeams) b.mat.uniforms.uTime.value = tA;
           exitSheet.mat.uniforms.uTime.value = tA;
           innerSheet.mat.uniforms.uTime.value = tA;
+        }
+
+        function updateOptics(tA, dt, rotZ, bob) {
+          updateTri(rotZ, bob);
+          const hasEntry = castEntry();
+          const ease = 1 - Math.exp(-6 * dt);
+          entryAlpha += ((hasEntry ? 1 : 0) - entryAlpha) * ease;
+          const tP = Math.max(0, tA - T0);
+          const lamp = clamp01(tP / 0.3);
+          const { dIn, airT, sinceEntry } = updateEntryBeams(tA, hasEntry, tP);
+          const glow = traceColumns(tA, airT, sinceEntry, ease, hasEntry, tP, dt);
+          updateGlowAndPulses(tA, tP, dIn, airT, sinceEntry, lamp, hasEntry, glow);
           return lamp;
         }
         const clock = new THREE.Clock();
         const THIRD = (Math.PI * 2) / 3;
         let ready = false;
         let spectrumSeen = false;
-        function animate() {
-          if (!App.landingActive) return;
-          requestAnimationFrame(animate);
-          const dt = Math.min(clock.getDelta(), 0.05);
-          tGlobal += dt;
-          const tA = tGlobal * SPD;
+        function updateDragMotion(dt, tA) {
           if (!dragging && (velZ || velY || velX)) {
             userZ += velZ * dt;
             userY = clamp(userY + velY * dt, -0.5, 0.5);
@@ -1157,20 +1236,20 @@ if (!window.THREE) {
             userZ = home + (userZ - home) * dec;
           }
           const amp = autoAmp;
-          const rotZ =
-            (Math.sin(tA * 0.31) * 0.15 + Math.sin(tA * 0.127) * 0.06) * amp +
-            userZ;
-          const rotY = Math.sin(tA * 0.21) * 0.32 * amp + userY;
-          const rotX = (Math.sin(tA * 0.165) * 0.09 + 0.02) * amp + userX;
-          const bob = Math.sin(tA * 0.5) * 0.055 * amp;
+          return {
+            rotZ:
+              (Math.sin(tA * 0.31) * 0.15 + Math.sin(tA * 0.127) * 0.06) * amp +
+              userZ,
+            rotY: Math.sin(tA * 0.21) * 0.32 * amp + userY,
+            rotX: (Math.sin(tA * 0.165) * 0.09 + 0.02) * amp + userX,
+            bob: Math.sin(tA * 0.5) * 0.055 * amp,
+          };
+        }
+
+        function updatePrismAndCamera(dt, tA, lamp, rotX, rotY, rotZ, bob) {
           prism.rotation.set(rotX, rotY, rotZ);
           prism.position.y = bob;
           prism.updateMatrixWorld();
-          const lamp = updateOptics(tA, dt, rotZ, bob);
-          if (!spectrumSeen && exitGlow.material.opacity > 0.03) {
-            spectrumSeen = true;
-            document.body.classList.add("spectrum");
-          }
           APEX_W.copy(APEX_LOCAL).applyMatrix4(prism.matrixWorld);
           apexDot.position.copy(APEX_W);
           apexDot.material.opacity = 0.9 * lamp;
@@ -1197,6 +1276,21 @@ if (!window.THREE) {
           );
           camera.lookAt(0, 0.05, 0);
           renderer.render(scene, camera);
+        }
+
+        function animate() {
+          if (!App.landingActive) return;
+          requestAnimationFrame(animate);
+          const dt = Math.min(clock.getDelta(), 0.05);
+          tGlobal += dt;
+          const tA = tGlobal * SPD;
+          const { rotX, rotY, rotZ, bob } = updateDragMotion(dt, tA);
+          const lamp = updateOptics(tA, dt, rotZ, bob);
+          if (!spectrumSeen && exitGlow.material.opacity > 0.03) {
+            spectrumSeen = true;
+            document.body.classList.add("spectrum");
+          }
+          updatePrismAndCamera(dt, tA, lamp, rotX, rotY, rotZ, bob);
           if (!ready) {
             ready = true;
             document.body.classList.add("ready");
@@ -1209,9 +1303,6 @@ if (!window.THREE) {
             renderer.dispose();
           } catch (err) {}
         };
-      }
-      try {
-        boot();
       } catch (err) {
         console.error(err);
       }

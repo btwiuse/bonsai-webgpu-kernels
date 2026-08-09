@@ -206,6 +206,113 @@ function appendAssistant(withThinking) {
   scrollDown(true);
   return msg;
 }
+function createTurnState(thinkTurn) {
+  const msg = appendAssistant(thinkTurn);
+  return {
+    msg,
+    tBlock: msg.querySelector(".t-block"),
+    tBody: msg.querySelector(".t-body"),
+    tLabel: msg.querySelector(".t-label"),
+    aBody: msg.querySelector(".a-body"),
+    phase: thinkTurn ? "think" : "answer",
+    thinking: "",
+    answer: "",
+    closed: false,
+    startedAt: performance.now(),
+    firstTokenAt: 0,
+    thinkEndedAt: 0,
+    tokens: 0,
+  };
+}
+
+function finishThinking(turn) {
+  turn.closed = true;
+  turn.thinkEndedAt = performance.now();
+  turn.tBlock.classList.remove("live", "open");
+  const seconds = (
+    (turn.thinkEndedAt - (turn.firstTokenAt || turn.startedAt)) /
+    1e3
+  ).toFixed(1);
+  turn.tLabel.classList.remove("t-shimmer");
+  turn.tLabel.textContent = `THOUGHT FOR ${seconds}S`;
+  if (!turn.thinking.trim()) turn.tBlock.remove();
+  setStatus("busy", "WRITING …");
+}
+
+function consumeTurnEvent(event, turn) {
+  const now = performance.now();
+  if (event.type === "complete") {
+    turn.tokens = event.result.tokens.length;
+    return;
+  }
+  if (!turn.firstTokenAt) turn.firstTokenAt = now;
+  turn.tokens++;
+  if (event.type === "thinking") {
+    turn.thinking += event.delta;
+    scheduleStream(() => {
+      turn.tBody.textContent = turn.thinking;
+      turn.tBody.scrollTop = turn.tBody.scrollHeight;
+    });
+  } else if (event.type === "text") {
+    if (turn.phase === "think") {
+      turn.phase = "answer";
+      finishThinking(turn);
+    }
+    turn.answer +=
+      turn.answer === "" ? event.delta.replace(/^\s+/, "") : event.delta;
+    scheduleStream(() => renderAnswer(turn.aBody, turn.answer, true));
+  }
+  updateLiveStat({
+    startedAt: turn.startedAt,
+    firstTokenAt: turn.firstTokenAt,
+    now,
+    tokens: turn.tokens,
+  });
+}
+
+function handleGenerationError(error, turn) {
+  console.error(error);
+  if (!turn.answer) {
+    turn.aBody.innerHTML = "";
+    const err = document.createElement("div");
+    err.className = "a-error";
+    err.textContent = `Generation stopped: ${String(error?.message ?? error)}`;
+    turn.aBody.appendChild(err);
+  }
+  setStatus("error", "ERROR · SEE CONSOLE");
+}
+
+function finishTurn(turn) {
+  if (turn.phase === "think" && !turn.closed) {
+    turn.tBlock.classList.remove("live");
+    turn.tLabel.classList.remove("t-shimmer");
+    turn.tLabel.textContent = "THINKING (INTERRUPTED)";
+  }
+  cancelStream();
+  if (turn.tBody?.isConnected) {
+    turn.tBody.textContent = turn.thinking;
+    turn.tBody.scrollTop = turn.tBody.scrollHeight;
+  }
+  if (turn.answer || !turn.aBody.firstChild) {
+    renderAnswer(turn.aBody, turn.answer, false);
+  }
+  appendMeta(turn.msg, {
+    startedAt: turn.startedAt,
+    firstTokenAt: turn.firstTokenAt,
+    thinkEndedAt: turn.thinkEndedAt,
+    endedAt: performance.now(),
+    tokens: turn.tokens,
+  });
+  scrollDown();
+  const content = chat.lastAssistantContent;
+  if (content !== null) messages.push({ role: "assistant", content });
+  setGenerating(false);
+  cLive.textContent = "";
+  abortController = null;
+  if (chat.contextFull) lockContextFull(turn.msg);
+  else cInput.focus();
+}
+
 async function send() {
   const text = cInput.value.trim();
   if (!text || !chat || isGenerating || contextExhausted) return;
@@ -215,34 +322,9 @@ async function send() {
   appendUser(text);
   messages.push({ role: "user", content: text });
   const thinkTurn = thinkingEnabled;
-  const msg = appendAssistant(thinkTurn);
-  const tBlock = msg.querySelector(".t-block");
-  const tBody = msg.querySelector(".t-body");
-  const tLabel = msg.querySelector(".t-label");
-  const aBody = msg.querySelector(".a-body");
+  const turn = createTurnState(thinkTurn);
   setGenerating(true);
   abortController = new AbortController();
-  let phase = thinkTurn ? "think" : "answer";
-  let thinking = "",
-    answer = "",
-    closed = false;
-  let startedAt = performance.now(),
-    firstTokenAt = 0,
-    thinkEndedAt = 0,
-    tokens = 0;
-  const finishThinking = () => {
-    closed = true;
-    thinkEndedAt = performance.now();
-    tBlock.classList.remove("live", "open");
-    const seconds = (
-      (thinkEndedAt - (firstTokenAt || startedAt)) /
-      1e3
-    ).toFixed(1);
-    tLabel.classList.remove("t-shimmer");
-    tLabel.textContent = `THOUGHT FOR ${seconds}S`;
-    if (!thinking.trim()) tBlock.remove();
-    setStatus("busy", "WRITING …");
-  };
   try {
     for await (const event of chat.streamTurn(messages, {
       signal: abortController.signal,
@@ -250,67 +332,12 @@ async function send() {
       thinkBudget,
       thinkEarlyStop,
     })) {
-      const now = performance.now();
-      if (event.type === "complete") {
-        tokens = event.result.tokens.length;
-        continue;
-      }
-      if (!firstTokenAt) firstTokenAt = now;
-      tokens++;
-      if (event.type === "thinking") {
-        thinking += event.delta;
-        scheduleStream(() => {
-          tBody.textContent = thinking;
-          tBody.scrollTop = tBody.scrollHeight;
-        });
-      } else if (event.type === "text") {
-        if (phase === "think") {
-          phase = "answer";
-          finishThinking();
-        }
-        answer +=
-          answer === "" ? event.delta.replace(/^\s+/, "") : event.delta;
-        scheduleStream(() => renderAnswer(aBody, answer, true));
-      }
-      updateLiveStat({ startedAt, firstTokenAt, now, tokens });
+      consumeTurnEvent(event, turn);
     }
   } catch (error) {
-    console.error(error);
-    if (!answer) {
-      aBody.innerHTML = "";
-      const err = document.createElement("div");
-      err.className = "a-error";
-      err.textContent = `Generation stopped: ${String(error?.message ?? error)}`;
-      aBody.appendChild(err);
-    }
-    setStatus("error", "ERROR · SEE CONSOLE");
+    handleGenerationError(error, turn);
   } finally {
-    if (phase === "think" && !closed) {
-      tBlock.classList.remove("live");
-      tLabel.classList.remove("t-shimmer");
-      tLabel.textContent = "THINKING (INTERRUPTED)";
-    }
-    cancelStream();
-    if (tBody?.isConnected) {
-      tBody.textContent = thinking;
-      tBody.scrollTop = tBody.scrollHeight;
-    }
-    if (answer || !aBody.firstChild) renderAnswer(aBody, answer, false);
-    appendMeta(msg, {
-      startedAt,
-      firstTokenAt,
-      thinkEndedAt,
-      endedAt: performance.now(),
-      tokens,
-    });
-    scrollDown();
-    const content = chat.lastAssistantContent;
-    if (content !== null) messages.push({ role: "assistant", content });
-    setGenerating(false);
-    cLive.textContent = "";
-    abortController = null;
-    if (chat.contextFull) lockContextFull(msg);
-    else cInput.focus();
+    finishTurn(turn);
   }
 }
 function lockContextFull(msg) {
