@@ -294,6 +294,11 @@ function finishTurn(turn) {
     turn.tBody.scrollTop = turn.tBody.scrollHeight;
   }
   if (turn.answer || !turn.aBody.firstChild) {
+    // The streaming paint appended a blinking .a-caret on every
+    // render; finishTurn should not show a caret, so invalidate the
+    // fast-path cache and re-render so the final paint runs and
+    // innerHTML is refreshed without the streaming caret.
+    turn.aBody._lastText = null;
     renderAnswer(turn.aBody, turn.answer, false);
   }
   appendMeta(turn.msg, {
