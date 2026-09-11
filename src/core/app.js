@@ -1,26 +1,9 @@
 import { Bonsai27B, DEFAULT_GGUF_FILE } from "../model/adapter.js";
-import { WorkerBonsai27B } from "../model/bonsai-client.js";
 import { setupModelAccess } from "../model/access.js";
 import { renderAnswer } from "../chat/markdown.js";
 import { setupKernelInspector } from "../model/kernel/inspector.js";
 
 const $ = (id) => document.getElementById(id);
-const queryParams = new URLSearchParams(location.search);
-const useWorkerRuntime = queryParams.get("runtime") === "worker";
-const modelRuntime = useWorkerRuntime ? WorkerBonsai27B : Bonsai27B;
-// Opt-in reasoning controls for bitgpu's think mode. Defaults stay untouched,
-// so the page behaves identically without these query parameters.
-const thinkBudgetRaw = queryParams.get("thinkBudget");
-const parsedThinkBudget = Number.parseInt(thinkBudgetRaw ?? "", 10);
-const thinkBudget = thinkBudgetRaw !== null &&
-    thinkBudgetRaw.trim() !== "" &&
-    Number.isFinite(parsedThinkBudget) &&
-    parsedThinkBudget >= 0
-  ? parsedThinkBudget
-  : undefined;
-const thinkEarlyStop = queryParams.has("thinkEarlyStop")
-  ? queryParams.get("thinkEarlyStop") !== "off"
-  : undefined;
 let chat = null;
 let messages = [];
 let isGenerating = false;
@@ -49,7 +32,7 @@ const cStatus = $("cStatus"),
   cStatusText = $("cStatusText"),
   cLive = $("cLive");
 const modelAccess = setupModelAccess({
-  Bonsai27B: modelRuntime,
+  Bonsai27B,
   defaultGgufFile: DEFAULT_GGUF_FILE,
   byId: $,
   getChat: () => chat,
@@ -240,26 +223,23 @@ function finishThinking(turn) {
   setStatus("busy", "WRITING …");
 }
 
-function consumeTurnEvent(event, turn) {
+function consumeTurnUpdate(update, turn, closeId) {
   const now = performance.now();
-  if (event.type === "complete") {
-    turn.tokens = event.result.tokens.length;
-    return;
-  }
   if (!turn.firstTokenAt) turn.firstTokenAt = now;
-  turn.tokens++;
-  if (event.type === "thinking") {
-    turn.thinking += event.delta;
-    scheduleStream(() => {
-      turn.tBody.textContent = turn.thinking;
-      turn.tBody.scrollTop = turn.tBody.scrollHeight;
-    });
-  } else if (event.type === "text") {
-    if (turn.phase === "think") {
+  if (update.token !== null) turn.tokens++;
+  if (turn.phase === "think") {
+    if (update.token === closeId) {
       turn.phase = "answer";
       finishThinking(turn);
+    } else {
+      turn.thinking += update.delta;
+      scheduleStream(() => {
+        turn.tBody.textContent = turn.thinking;
+        turn.tBody.scrollTop = turn.tBody.scrollHeight;
+      });
     }
-    turn.answer += turn.answer === "" ? event.delta.replace(/^\s+/, "") : event.delta;
+  } else {
+    turn.answer += turn.answer === "" ? update.delta.replace(/^\s+/, "") : update.delta;
     scheduleStream(() => renderAnswer(turn.aBody, turn.answer, true));
   }
   updateLiveStat({
@@ -326,20 +306,18 @@ async function send() {
   autoGrow();
   appendUser(text);
   messages.push({ role: "user", content: text });
-  const thinkTurn = thinkingEnabled;
+  const thinkTurn = thinkingEnabled && chat.thinkCloseTokenId !== null;
+  chat.chatTemplateArgs = {
+    enable_thinking: thinkingEnabled,
+    preserve_thinking: true,
+  };
   const turn = createTurnState(thinkTurn);
   setGenerating(true);
   abortController = new AbortController();
+  const closeId = chat.thinkCloseTokenId;
   try {
-    for await (
-      const event of chat.streamTurn(messages, {
-        signal: abortController.signal,
-        think: thinkTurn,
-        thinkBudget,
-        thinkEarlyStop,
-      })
-    ) {
-      consumeTurnEvent(event, turn);
+    for await (const update of chat.generate(messages, { signal: abortController.signal })) {
+      consumeTurnUpdate(update, turn, closeId);
     }
   } catch (error) {
     handleGenerationError(error, turn);

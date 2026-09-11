@@ -111,7 +111,7 @@ export class KernelInspector {
     });
   }
 
-  async openKernels() {
+  openKernels() {
     const $ = this.$;
     const list = $("kxList");
     list.replaceChildren();
@@ -129,17 +129,10 @@ export class KernelInspector {
       return;
     }
 
-    $("kxSub").textContent = "LOADING PINNED BITGPU WGSL SOURCES";
-    try {
-      this.kernels = await (chat.runtime.getShaderSources?.() ?? []);
-      this.kernels = this.kernels.filter(
-        (kernel) => !/\btranscode\b|\.transcode\./i.test(kernel.name),
-      );
-      this.renderKernelList();
-    } catch {
-      this.kernels = [];
-      $("kxSub").textContent = "KERNEL SOURCE CATALOG UNAVAILABLE";
-    }
+    this.kernels = (chat.runtime.getRenderedShaders?.() ?? []).filter(
+      (kernel) => !/\btranscode\b|\.transcode\./i.test(kernel.name),
+    );
+    this.renderKernelList();
   }
 
   renderKernelList() {

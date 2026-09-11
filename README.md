@@ -55,10 +55,11 @@ src/
 | `src/chat/markdown.js`                   | Incremental Markdown and KaTeX answer rendering                                                                       |
 | `src/model/access.js`                    | Access gate, WebGPU availability checks, and model load lifecycle                                                     |
 | `src/model/catalog.js`                   | Model weights, tokenizer, and generation metadata                                                                     |
-| `src/model/fetch.js`                     | Authenticated GGUF requests and optional Cache Storage integration                                                    |
-| `src/model/worker.js`                    | Module Worker hosting the bitgpu runtime                                                                              |
-| `src/model/bonsai-client.js`             | Main-thread facade for the Worker                                                                                     |
-| `src/model/adapter.js`                   | Model URL resolution, Hugging Face access-token requests, loading progress, and the UI-facing streaming chat contract |
+| `src/model/fetch.js`                     | Legacy standalone fetch adapter, retained for source compatibility                                                    |
+| `src/model/worker.js`                    | Optional Worker runtime, not used by the default entrypoint                                                          |
+| `src/model/bonsai-client.js`             | Optional Worker facade, not used by the default entrypoint                                                          |
+| `src/model/adapter.js`                   | Re-exports the legacy runtime used by `index.html`                                                                    |
+| `src/model/index-runtime.js`             | Extracted `index.html` runtime, synchronized by `tools/extract-index-runtime.mjs`                                     |
 | `src/model/kernel/sources.js`            | WGSL kernel-source catalogue                                                                                          |
 | `src/model/kernel/inspector.js`          | Kernel-source dialog and search UI                                                                                    |
 | `src/ui/landing.css`                     | Landing composition and transition styles                                                                             |
@@ -73,7 +74,8 @@ src/
 
 `buildless.html` is the single entry. Script and link tags must load in
 this exact order — each later script assumes the earlier ones have
-already attached their globals.
+already attached their globals. Its model runtime is extracted from
+`index.html`, so both entries use the same model loader and cache protocol.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
@@ -314,8 +316,8 @@ deno task lint        # deno lint (advisory; hints, not a gate)
   `scenes/prism/class.js` own their respective scenes.
 
 The chat turn in `core/app.js` is driven by a small state object:
-`createTurnState()` builds the message, `consumeTurnEvent()` applies
-stream events, and `finishTurn()` finalizes meta, history, and
+`createTurnState()` builds the message, `consumeTurnUpdate()` applies
+runtime token updates, and `finishTurn()` finalizes meta, history, and
 context-full handling. Scene classes are composed from per-topic
 method mixins via `Object.assign(prototype, …)` so each topic lives
 in its own focused file.
@@ -324,13 +326,11 @@ in its own focused file.
 
 ## Pinned runtime
 
-The GPU implementation is loaded as pinned browser ESM from jsDelivr:
-
-- `bitgpu@0.19.1/dist/index.js`: WebGPU inference engine
-- `bitgpu@0.19.1/dist/gguf.js`: GGUF parser and Bonsai-27B model
-  manifest adapter
-- `bitgpu@0.19.1/dist/chat.js`: tokenizer, Jinja chat template, and
-  streaming chat layer
+`buildless.html` reuses the model runtime extracted from the current
+`index.html`. Run `node src/tools/extract-index-runtime.mjs --check`
+to verify that the extracted runtime has not drifted from `index.html`.
+The extracted runtime contains the pinned WebGPU engine, GGUF loader,
+tokenizer, and chat layer.
 
 For its default model, the page also reads bitgpu's pinned,
 GPU-validated `models/bonsai-27b-gguf/manifest.json` and auxiliary
@@ -342,52 +342,30 @@ The answer renderer also loads pinned browser ESM from esm.sh:
 `marked@17`, `katex@0.16`, and `dompurify@3.2.6`. DOMPurify sanitizes
 generated Markdown before it is inserted into the page.
 
-`Bonsai-27B` requests bitgpu's `q8` KV cache and `f16` activation
-path. The runtime falls back safely when `shader-f16` is
-unavailable. Its pinned Qwen3.5 hybrid backbone does not support
-bitgpu's `overflow: "sinks"` policy, so this page retains strict
-context-window errors rather than exposing an invalid fixed-memory
-option.
+`buildless.html` now uses the same runtime configuration as
+`index.html`: device-dependent precision selection, the same KV-cache
+allocation, the same pipeline warmup and decode calibration, and the
+same default generation options. Custom `?src=` GGUF URLs follow the
+same legacy runtime path as `index.html`.
 
-For the default Bonsai-27B model, each turn uses bitgpu's upstream
-recommended sampling settings: `temperature: 0.5`, `topP: 0.85`, and
-`topK: 20`. Custom `?src=` GGUF URLs retain bitgpu's own defaults
-unless their caller supplies turn options.
+The model loader uses the same `gguf-v1` Cache Storage header cache and
+`gguf-cache-v1` IndexedDB tensor-range cache as `index.html`. Cache
+Storage and IndexedDB are origin-scoped, so the two entries share
+completed model data when opened under the same origin.
 
-Thinking is opt-in per turn (the composer bulb). Two query
-parameters add optional bounds without changing default behavior:
+Thinking is opt-in per turn through the composer bulb, matching
+`index.html`. The default page does not add reasoning budgets,
+early-stop filters, or other generation parameters.
 
-- `?thinkBudget=N` forces bitgpu to close `</think>` after N
-  reasoning tokens.
-- `?thinkEarlyStop` enables bitgpu's logit-confidence early stop
-  for thinking (`?thinkEarlyStop=off` explicitly disables it).
+The default runtime stays on the main thread, matching `index.html`.
+The optional Worker modules remain available for separate experiments,
+but are not selected by the default entrypoint.
 
-Both are candidate-filter features in bitgpu@0.19.1 and work on the
-pinned Qwen3.5 hybrid backbone. They are deliberately not part of
-the default page: the original page never bounded reasoning, so
-default turns stay equivalent.
+The Kernels panel reads the shader sources captured by the same
+runtime during pipeline compilation, matching the compiled-kernel view
+in `index.html`.
 
-Evaluated and not integrated: `chat.save/restore` snapshots are full
-KV-cache serializations (heavy for a 4096-token q8 cache on a 27B
-hybrid), and delta snapshots (`prewarm` + `save({ delta: true })`)
-are explicitly rejected by the engine for the qwen3_5 hybrid
-backbone; `prewarm` alone only serves that checkpointing pattern;
-`countTokens` has no original-page UI equivalent that would not
-change existing behavior. `promptLookup` is left disabled because
-the hybrid backbone rejects it and the page never forwards it.
-
-Add `?runtime=worker` to host bitgpu in a module Worker, following
-bitgpu's worker example. This is opt-in because Worker WebGPU
-availability differs by browser; the default keeps the broadly
-compatible main-thread runtime.
-
-The Kernels panel reads static WGSL files lazily from the same
-pinned `bitgpu` source tag on jsDelivr. Public `bitgpu` does not
-expose browser-specific compiled-pipeline variants, so the displayed
-code is the pinned source catalogue rather than a serialization of
-live pipelines.
-
-The source for the pinned runtime is available at
-<https://github.com/stfurkan/bitgpu/tree/v0.19.1/src>. The prior
-self-contained bundle is preserved in commit `b7eac7e` and is no
-longer loaded by the page.
+The source for the pinned runtime is synchronized from `index.html`
+by `src/tools/extract-index-runtime.mjs`; the extractor fails if the
+legacy cache contract changes. The prior self-contained bundle is
+preserved in commit `b7eac7e` and is no longer loaded by the page.

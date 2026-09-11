@@ -231,7 +231,7 @@ class ModelAccess {
     if (event.status === "init") {
       BonsaiLoader.phase((event.message || "INITIALIZING").toUpperCase());
     } else if (event.status === "tokenizer") {
-      BonsaiLoader.phase("PARSING TOKENIZER - 248K VOCAB");
+      BonsaiLoader.phase("PARSING TOKENIZER \u2014 248K VOCAB");
     } else if (event.status === "weights") {
       if (event.kind === "bytes" && Number.isFinite(event.loaded)) {
         BonsaiLoader.phase(null);
@@ -241,7 +241,7 @@ class ModelAccess {
         );
       } else if (event.kind === "tensors") {
         if (/warmup/i.test(event.message || "")) {
-          BonsaiLoader.phase("COMPILING WEBGPU KERNELS - WARMUP");
+          BonsaiLoader.phase("COMPILING WEBGPU KERNELS \u00b7 WARMUP");
         } else if (Number.isFinite(event.total) && event.total > 0) {
           BonsaiLoader.info({
             tensors: event.loaded,
@@ -293,7 +293,6 @@ class ModelAccess {
         cache: this.query.has("nocache") ? false : undefined,
         maxLength: Number.parseInt(this.query.get("ctx") ?? "", 10) ||
           undefined,
-        overflow: this.query.get("overflow") === "sinks" ? "sinks" : undefined,
         onProgress: (event) => this.onLoadProgress(event),
       });
       this.setChat(chat);
