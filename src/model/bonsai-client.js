@@ -111,6 +111,10 @@ class WorkerChatClient {
     this.worker.postMessage({ type: "reset" });
   }
 
+  generate(messages, options) {
+    return this.streamTurn(messages, options);
+  }
+
   async *streamTurn(messages, options) {
     this.events = [];
     this.generationDone = false;
