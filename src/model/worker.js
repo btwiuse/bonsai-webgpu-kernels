@@ -20,27 +20,34 @@ self.onmessage = async ({ data }) => {
         ...data.options,
         onProgress: (progress) => postMessage({ type: "progress", progress }),
       });
-      postMessage({ type: "ready", contextLength: chat.contextLength });
+      postMessage({
+        type: "ready",
+        contextLength: chat.contextLength,
+        thinkCloseTokenId: chat.thinkCloseTokenId,
+      });
       return;
     }
 
     if (data.type === "generate" && chat) {
       generationAbort = new AbortController();
-      for await (
-        const event of chat.streamTurn(data.messages, {
-          ...data.options,
-          signal: generationAbort.signal,
-        })
-      ) {
-        postMessage({ type: "event", event });
+      chat.chatTemplateArgs = data.chatTemplateArgs ?? {};
+      for await (const update of chat.generate(data.messages, {
+        ...data.options,
+        signal: generationAbort.signal,
+      })) {
+        postMessage({ type: "update", update });
       }
-      postMessage({ type: "generation-complete" });
+      postMessage({
+        type: "generation-complete",
+        lastAssistantContent: chat.lastAssistantContent,
+      });
       generationAbort = null;
       return;
     }
 
     if (data.type === "abort") generationAbort?.abort();
     if (data.type === "reset") chat?.reset();
+    if (data.type === "template" && chat) chat.chatTemplateArgs = data.args ?? {};
   } catch (error) {
     generationAbort = null;
     postError(error);

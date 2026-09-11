@@ -1,9 +1,12 @@
 import { Bonsai27B, DEFAULT_GGUF_FILE } from "../model/adapter.js";
+import { WorkerBonsai27B } from "../model/bonsai-client.js";
 import { setupModelAccess } from "../model/access.js";
 import { renderAnswer } from "../chat/markdown.js";
 import { setupKernelInspector } from "../model/kernel/inspector.js";
 
 const $ = (id) => document.getElementById(id);
+const useWorkerRuntime = new URLSearchParams(location.search).get("runtime") === "worker";
+const modelRuntime = useWorkerRuntime ? WorkerBonsai27B : Bonsai27B;
 let chat = null;
 let messages = [];
 let isGenerating = false;
@@ -32,7 +35,7 @@ const cStatus = $("cStatus"),
   cStatusText = $("cStatusText"),
   cLive = $("cLive");
 const modelAccess = setupModelAccess({
-  Bonsai27B,
+  Bonsai27B: modelRuntime,
   defaultGgufFile: DEFAULT_GGUF_FILE,
   byId: $,
   getChat: () => chat,

@@ -26,9 +26,14 @@ class WorkerChatClient {
   constructor(worker) {
     this.worker = worker;
     this.contextLength = 0;
+    this.thinkCloseTokenId = null;
     this.contextFull = false;
     this.lastAssistantContent = null;
-    this.runtime = { getShaderSources: loadBitgpuKernelSources };
+    this.chatTemplateArgs = {};
+    this.runtime = {
+      getShaderSources: loadBitgpuKernelSources,
+      getRenderedShaders: () => [],
+    };
     this.events = [];
     this.wake = null;
     this.loadResolve = null;
@@ -59,20 +64,19 @@ class WorkerChatClient {
     }
     if (message.type === "ready") {
       this.contextLength = message.contextLength;
+      this.thinkCloseTokenId = message.thinkCloseTokenId ?? null;
       this.loadResolve?.();
       this.loadResolve = this.loadReject = null;
       this.loadOptions = null;
       return;
     }
-    if (message.type === "event") {
-      if (message.event.type === "complete") {
-        this.lastAssistantContent = message.event.result.text;
-      }
-      this.events.push(message.event);
+    if (message.type === "update") {
+      this.events.push(message.update);
       this.notify();
       return;
     }
     if (message.type === "generation-complete") {
+      this.lastAssistantContent = message.lastAssistantContent ?? null;
       this.generationDone = true;
       this.notify();
       return;
@@ -103,6 +107,7 @@ class WorkerChatClient {
   reset() {
     this.contextFull = false;
     this.lastAssistantContent = null;
+    this.chatTemplateArgs = {};
     this.worker.postMessage({ type: "reset" });
   }
 
@@ -117,6 +122,7 @@ class WorkerChatClient {
       type: "generate",
       messages,
       options: workerOptions,
+      chatTemplateArgs: this.chatTemplateArgs,
     });
     try {
       while (!this.generationDone || this.events.length > 0) {
